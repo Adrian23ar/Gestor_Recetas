@@ -1,0 +1,154 @@
+/* 1. Importar la configuración JS (Asegúrate que la ruta sea correcta desde style.css a la raíz) */
+@config "../../tailwind.config.js";
+
+/* 2. Importar las capas de Tailwind (o usar @tailwind base; @tailwind components; @tailwind utilities;) */
+@import "tailwindcss";
+@import "@vueform/multiselect/themes/default.css"; /* <-- Añadir esta línea */
+@import "datatables.net-dt";
+@import "datatables.net-responsive-dt";
+
+/* 3. Estilos Base Globales (Opcional - Tailwind base ya hace mucho) */
+body {
+  /* Aplicamos fondo y color de texto usando las CLASES que ahora usan nuestra config */
+  @apply bg-background text-text-base antialiased;
+  /* font-family se aplica por defecto por la config */
+  margin: 0;
+}
+
+/* 4. Estilos para Transiciones de Vue y Enlace Activo (Mantenemos) */
+.slide-fade-enter-active {
+  transition: all 0.3s ease-out;
+}
+.slide-fade-leave-active {
+  transition: all 0.2s ease-in;
+}
+.slide-fade-enter-from,
+.slide-fade-leave-to {
+  transform: translateY(-10px);
+  opacity: 0;
+}
+
+.card-list-enter-active,
+.card-list-leave-active {
+  transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); /* Ease-out quad */
+}
+.card-list-enter-from,
+.card-list-leave-to {
+  opacity: 0;
+  transform: translateY(30px) scale(0.95);
+}
+
+/* Asegura que el layout no salte bruscamente durante las animaciones de salida */
+/* Ajusta si causa problemas con tu grid específico */
+.card-list-leave-active {
+  /* position: absolute; */ /* Descomenta con precaución si el grid se rompe */
+  width: 100%; /* Ayuda a mantener el espacio */
+}
+
+/* Animación de movimiento cuando la lista se reordena (si aplica) */
+.card-list-move {
+  transition: transform 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* Aplica solo la transicion de opacidad al elemento envuelto por Transition (el backdrop div) */
+.modal-transition-enter-active,
+.modal-transition-leave-active {
+  transition: opacity 0.2s ease-out;
+}
+
+/* Define el estado inicial/final de opacidad para el elemento envuelto (el backdrop) */
+.modal-transition-enter-from,
+.modal-transition-leave-to {
+  opacity: 0;
+}
+
+/* Ahora, aplica transiciones a la caja de contenido (el div interior) */
+/* Targeteamos el div con clase 'modal-content' cuando el padre tiene las clases de transicion */
+.modal-transition-enter-active .modal-content,
+.modal-transition-leave-active .modal-content {
+  transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+}
+
+/* Define el estado inicial/final para la caja de contenido */
+.modal-transition-enter-from .modal-content,
+.modal-transition-leave-to .modal-content {
+  opacity: 0; /* La caja de contenido tambien inicia/termina invisible */
+  transform: scale(0.95); /* Y inicia/termina ligeramente mas pequeña */
+}
+
+/* --- Inicio Ajustes de Estilo para DataTables --- */
+
+/* Importar CSS de DataTables y Responsive */
+
+/* --- Ajustes de Estilo para Tailwind --- */
+
+.datatable-container {
+  @apply w-full text-sm;
+}
+div.dt-container {
+  @apply bg-contrast rounded-lg border border-neutral-200 shadow-md p-4 dark:bg-dark-contrast dark:border-dark-neutral-700 dark:shadow-xl;
+}
+div.dt-layout-row {
+  @apply flex flex-wrap justify-between items-center gap-4 mb-3;
+}
+/* Input de búsqueda */
+div.dt-search input {
+  @apply px-3 py-1.5 border border-neutral-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 dark:border-dark-neutral-600 dark:bg-dark-neutral-800 dark:text-dark-text-base dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400;
+}
+div.dt-search label {
+  @apply hidden;
+}
+/* Info Paginación */
+div.dt-info {
+  @apply text-sm text-text-muted dark:text-dark-text-muted;
+}
+/* Paginación Botones */
+div.dt-paging {
+  @apply inline-flex items-center space-x-1;
+}
+button.dt-paging-button {
+  @apply px-3 py-1 border border-neutral-300 rounded-md text-sm cursor-pointer transition-colors duration-150 hover:bg-neutral-100 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-accent-500 dark:border-dark-neutral-600 dark:text-dark-text-muted dark:hover:bg-dark-neutral-700;
+}
+button.dt-paging-button.current {
+  @apply bg-accent-500 border-accent-500 text-white font-semibold cursor-default pointer-events-none dark:bg-dark-accent-400 dark:border-dark-accent-400 dark:text-dark-text-base;
+}
+button.dt-paging-button.disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+/* Tabla Estilos */
+table.dataTable {
+  @apply !w-full border-collapse my-0;
+}
+table.dataTable thead th {
+  @apply px-4 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider bg-neutral-100 dark:bg-dark-neutral-800 dark:text-dark-text-muted border-b border-neutral-300 dark:border-dark-neutral-600;
+  background-image: none !important;
+}
+table.dataTable tbody tr {
+  @apply border-b border-neutral-200 dark:border-dark-neutral-700;
+}
+table.dataTable tbody tr:hover {
+  @apply bg-neutral-50 dark:bg-dark-neutral-800/50;
+}
+table.dataTable tbody td {
+  @apply px-4 py-3 whitespace-nowrap text-sm text-text-base dark:text-dark-text-base;
+}
+table.dataTable tbody td.dt-control {
+  @apply text-center cursor-pointer;
+}
+table.dataTable td:last-child {
+  @apply text-center;
+}
+/* Footer específico de TableRegister */
+table.dataTable tfoot th:nth-child(3) {
+  @apply text-success-700 dark:text-success-400;
+} /* Ganancia Neta */
+table.dataTable tfoot th:nth-child(1), /* Label */
+ table.dataTable tfoot th:nth-child(2), /* Ingreso */
+ table.dataTable tfoot th:nth-child(4), /* Capital */
+ table.dataTable tfoot th:nth-child(5), /* Reinversion */
+ table.dataTable tfoot th:nth-child(6) {
+  @apply text-text-base dark:text-dark-text-base;
+} /* Sueldo */
+table.dataTable tfoot th:nth-child(3) {
+  @apply text-text-base dark:text-dark-text-base;
+} /* Gastos */
