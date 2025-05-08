@@ -99,14 +99,17 @@ async function handleAddIngredient() {
     }
 
     const tempId = Date.now().toString();
-    // --- Pasar initialStock al objeto temporal ---
+    // Obtén el valor inicial y asegúrate de que sea un número (o 0 si está vacío/nulo)
+    const initialStockValue = Number(newIngredient.value.initialStock) || 0;
     const tempIngredient = {
         id: tempId,
         name: newIngredient.value.name.trim(),
         cost: Number(newIngredient.value.cost),
         presentationSize: Number(newIngredient.value.presentationSize),
         unit: newIngredient.value.unit,
-        initialStock: Number(newIngredient.value.initialStock) || 0 // <-- Usar valor del form o 0
+        initialStock: initialStockValue,
+        // *** AÑADE ESTA LÍNEA ***
+        currentStock: initialStockValue // Asegura que currentStock exista para DataTables
     };
 
     // Actualización optimista del estado local
@@ -117,10 +120,23 @@ async function handleAddIngredient() {
         if (success) {
             toast.success(`Ingrediente '${tempIngredient.name}' añadido exitosamente.`);
             newIngredient.value = { name: '', cost: null, presentationSize: null, unit: 'Gr', initialStock: null };
+        } else {
+            // Si addIngredient devuelve false (indicando fallo), revierte la adición optimista
+            const indexToRemove = globalIngredients.value.findIndex(ing => ing.id === tempId);
+            if (indexToRemove !== -1) {
+                globalIngredients.value.splice(indexToRemove, 1);
+            }
+            // Ya no necesitas mostrar el toast de error aquí si addIngredient ya lo hizo
+            // toast.error("No se pudo añadir el ingrediente (falló la persistencia).");
         }
     } catch (error) {
         console.error("Error al añadir ingrediente:", error);
         toast.error("No se pudo añadir el ingrediente. Inténtalo de nuevo.");
+        // Revierte la adición optimista en caso de error
+        const indexToRemove = globalIngredients.value.findIndex(ing => ing.id === tempId);
+        if (indexToRemove !== -1) {
+            globalIngredients.value.splice(indexToRemove, 1);
+        }
     }
 }
 
@@ -313,17 +329,17 @@ function formatCurrency(value) {
                 </div>
                 <div>
                     <span class="block text-2xl font-bold text-success-600 dark:text-success-400">{{ highStockCount
-                    }}</span>
+                        }}</span>
                     <span class="text-sm text-text-muted dark:text-dark-text-muted">Stock Alto (&gt;60%)</span>
                 </div>
                 <div>
                     <span class="block text-2xl font-bold text-warning-600 dark:text-warning-400">{{ mediumStockCount
-                    }}</span>
+                        }}</span>
                     <span class="text-sm text-text-muted dark:text-dark-text-muted">Stock Medio (26-60%)</span>
                 </div>
                 <div>
                     <span class="block text-2xl font-bold text-danger-600 dark:text-danger-400">{{ lowStockCount
-                    }}</span>
+                        }}</span>
                     <span class="text-sm text-text-muted dark:text-dark-text-muted">Stock Bajo (&lt;=25%)</span>
                 </div>
                 <div v-if="unknownStockCount > 0"

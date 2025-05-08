@@ -605,23 +605,29 @@ function calculateSummary(filteredList) {
     };
 }
 
-// ÚNICO Watcher responsable de la carga inicial y cambios posteriores
-watch(user, (newUser, oldUser) => {
-    const newUid = newUser ? newUser.uid : null;
-    const oldUid = oldUser ? oldUser.uid : null;
+watch(
+    () => ({ u: user.value, al: authLoading.value }), // Observa un objeto con user y authLoading
+    (currentState, prevState) => {
+        const currentUid = currentState.u ? currentState.u.uid : null;
 
-    // Cargar/Recargar siempre que el UID cambie o en la primera ejecución (immediate: true)
-    // La comparación newUid !== oldUid maneja cambios de login/logout
-    // La ejecución inicial por immediate: true maneja el estado al montar
-    if (newUid !== oldUid) {
-        console.log(`useAccountingData: Watcher 'user' detectó cambio (Old: ${oldUid}, New: ${newUid}). Llamando loadAccountingData(${newUid || 'null'}).`);
-        loadAccountingData(newUid);
-    }
-    // La primera vez que se ejecuta (immediate), si newUid === oldUid (ambos null o ambos el mismo usuario ya cargado),
-    // la condición if no se cumple, pero la carga inicial es necesaria.
-    // Por lo tanto, NO necesitamos un bloque `else if` aquí. La llamada inicial se hace abajo.
+        console.log(`useAccountingData: Watcher combinado activado. User: ${currentUid}, AuthLoading: ${currentState.al}`);
 
-}, { deep: true, immediate: true }); // immediate: true para la carga inicial
+        if (currentState.al === false) { // Solo proceder si la autenticación está resuelta
+            // Esto se activará en la carga inicial (cuando authLoading pase a false)
+            // y también cuando el usuario inicie o cierre sesión.
+            console.log(`useAccountingData: Auth resuelto. Llamando loadAccountingData(${currentUid || 'null'}).`);
+            loadAccountingData(currentUid); // loadAccountingData ya maneja la lógica de Firestore vs localStorage
+        } else if (currentState.al === true) {
+            // La autenticación está en proceso
+            if (!accountingLoading.value) {
+                accountingLoading.value = true;
+                accountingError.value = null;
+                console.log(`useAccountingData: Auth está cargando. Estableciendo accountingLoading a true.`);
+            }
+        }
+    },
+    { deep: true, immediate: true }
+);
 
 
 // --- Exportar ---

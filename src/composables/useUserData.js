@@ -938,66 +938,90 @@ let isUserDataLoading = false;
 
 // --- Carga de Datos ---
 async function loadDataFromFirestore(userId) {
-    // Guarda anti-concurrencia
-    if (isUserDataLoading) {
-        console.log(`useUserData: Carga para ${userId || 'localStorage'} ya en progreso, omitiendo llamada duplicada.`);
+    if (isUserDataLoading && !userId) { // Prevenir recarga innecesaria si ya está en modo localStorage
+        console.log('useUserData: Ya en modo localStorage, no se recarga desde localStorage por loadDataFromFirestore(null).');
+        dataLoading.value = false;
         return;
     }
+
     isUserDataLoading = true;
-    dataLoading.value = true; // Poner ANTES del try
+    dataLoading.value = true;
     dataError.value = null;
-    console.log(`useUserData: Iniciando carga desde Firestore para el usuario: ${userId}...`);
 
-    try {
-        // Cargar Recetas
-        const recipesColRef = collection(db, `users/${userId}/recipes`);
-        const recipeSnapshot = await getDocs(recipesColRef);
-        recipes.value = recipeSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, ingredients: Array.isArray(doc.data().ingredients) ? doc.data().ingredients : [] }));
-        console.log(`useUserData: Cargadas ${recipes.value.length} recetas.`);
+    if (userId) { // Cuando hay un usuario conectado
+        console.log(`useUserData: Iniciando carga desde Firestore para el usuario: ${userId}...`);
+        try {
+            // Tu lógica actual para cargar desde Firestore...
+            // Ejemplo para recetas:
+            const recipesColRef = collection(db, `users/${userId}/recipes`);
+            const recipeSnapshot = await getDocs(recipesColRef);
+            recipes.value = recipeSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, ingredients: Array.isArray(doc.data().ingredients) ? doc.data().ingredients : [] }));
 
-        // Cargar Ingredientes
-        const ingredientsColRef = collection(db, `users/${userId}/ingredients`);
-        const ingredientSnapshot = await getDocs(ingredientsColRef);
-        globalIngredients.value = ingredientSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, currentStock: Number(doc.data().currentStock) || 0 }));
-        console.log(`useUserData: Cargados ${globalIngredients.value.length} ingredientes.`);
+            // ... cargar ingredientes y registros de producción de la misma manera
+            const ingredientsColRef = collection(db, `users/${userId}/ingredients`);
+            const ingredientSnapshot = await getDocs(ingredientsColRef);
+            globalIngredients.value = ingredientSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, currentStock: Number(doc.data().currentStock) || 0 }));
 
-        // Cargar Registros de Producción
-        const productionColRef = collection(db, `users/${userId}/production`);
-        const productionSnapshot = await getDocs(productionColRef);
-        productionRecords.value = productionSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, netProfit: Number(doc.data().netProfit) || 0 }));
-        console.log(`useUserData: Cargados ${productionRecords.value.length} registros de producción.`);
+            const productionColRef = collection(db, `users/${userId}/production`);
+            const productionSnapshot = await getDocs(productionColRef);
+            productionRecords.value = productionSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, netProfit: Number(doc.data().netProfit) || 0 }));
 
-    } catch (error) {
-        console.error("useUserData: Error cargando datos de Firestore:", error);
-        dataError.value = "Error al cargar datos del servidor.";
-    } finally {
+            console.log(`useUserData: Datos de Firestore cargados.`);
+        } catch (error) {
+            console.error("useUserData: Error cargando datos de Firestore:", error);
+            dataError.value = "Error al cargar datos del servidor.";
+            // Considera vaciar los arrays si falla la carga de Firestore
+            // recipes.value = [];
+            // globalIngredients.value = [];
+            // productionRecords.value = [];
+        } finally {
+            isUserDataLoading = false;
+            dataLoading.value = false;
+        }
+    } else { // Cuando NO hay usuario (sesión cerrada)
+        console.log('useUserData: No hay usuario, cargando datos desde localStorage via loadDataFromFirestore.');
+        recipes.value = JSON.parse(localStorage.getItem('recipes') || '[]');
+        globalIngredients.value = JSON.parse(localStorage.getItem('globalIngredients') || '[]');
+        productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]');
+        console.log('useUserData: Datos de localStorage cargados.');
+        isUserDataLoading = false; // Indicar que ya no está cargando específicamente para Firestore
         dataLoading.value = false;
-        isUserDataLoading = false; // Liberar bandera
-        console.log(`useUserData: Finalizada carga desde Firestore. dataLoading = ${dataLoading.value}`);
     }
 }
+
 
 // --- Observadores de Estado ---
 
 // ÚNICO Watcher responsable de la carga inicial y cambios posteriores
 watch(authLoading, (newAuthLoadingValue, oldAuthLoadingValue) => {
     console.log(`useUserData: authLoading cambió. Nuevo: ${newAuthLoadingValue}, Viejo: ${oldAuthLoadingValue}`);
-    if (newAuthLoadingValue === false && oldAuthLoadingValue === true) {
-        // Auth acaba de terminar de cargar
-        console.log(`useUserData: Auth resuelto. Usuario: ${user.value ? user.value.uid : 'null'}. Llamando a loadDataFromFirestore desde watch(authLoading).`);
-        loadDataFromFirestore(user.value ? user.value.uid : null);
-    } else if (newAuthLoadingValue === true) {
-        // Auth está cargando
-        if (!dataLoading.value) { // Solo si no estaba ya cargando
+    if (newAuthLoadingValue === false) { // Auth resuelto
+        const currentUserId = user.value ? user.value.uid : null;
+        if (currentUserId) {
+            console.log(`useUserData: Auth resuelto. Usuario: <span class="math-inline">\{currentUserId\}\. Llamando a loadDataFromFirestore\(</span>{currentUserId}).`);
+            loadDataFromFirestore(currentUserId);
+        } else {
+            // Usuario está desconectado y la autenticación ha finalizado.
+            console.log('useUserData: Auth resuelto. Usuario desconectado. Cargando desde localStorage directamente en watch(authLoading).');
+            if (!isUserDataLoading || dataLoading.value) { // Evitar si ya se está en proceso de carga local por otra vía
+                dataLoading.value = true; // Mostrar carga mientras se lee localStorage
+                recipes.value = JSON.parse(localStorage.getItem('recipes') || '[]');
+                globalIngredients.value = JSON.parse(localStorage.getItem('globalIngredients') || '[]');
+                productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]');
+                dataLoading.value = false;
+                dataError.value = null;
+                isUserDataLoading = false; // Asegurarse que no está en estado de "cargando de Firestore"
+                console.log('useUserData: Datos locales cargados (auth resuelto, sin usuario). dataLoading = false.');
+            }
+        }
+    } else if (newAuthLoadingValue === true) { // Auth está cargando
+        if (!dataLoading.value) {
             console.log("useUserData: authLoading es true, estableciendo dataLoading.");
             dataLoading.value = true;
             dataError.value = null;
         }
     }
-    // Si la llamada immediate es true y authLoading ya es false, este watcher no hará nada inicialmente.
-    // El estado inicial de `user` (null o el usuario) determinará la primera carga.
 }, { immediate: true });
-
 // Watcher SECUNDARIO para manejar el logout y cargar de localStorage
 watch(user, (newUser, oldUser) => {
     const newUid = newUser ? newUser.uid : null;
