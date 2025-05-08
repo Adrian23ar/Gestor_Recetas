@@ -154,7 +154,11 @@ const formattedEventType = computed(() => {
         STOCK_MANUAL_EDIT: 'Stock de Ingrediente Editado Manualmente',
         STOCK_ADJUST_BY_PRODUCTION_ADD: 'Stock Descontado por Producción',
         STOCK_ADJUST_BY_PRODUCTION_DELETE: 'Stock Restaurado (Producción Eliminada)',
-        STOCK_ADJUST_BY_PRODUCTION_EDIT: 'Stock Ajustado (Edición de Producción)'
+        STOCK_ADJUST_BY_PRODUCTION_EDIT: 'Stock Ajustado (Edición de Producción)',
+        TRANSACTION_CREATED: 'Transacción Creada',
+        TRANSACTION_EDITED: 'Transacción Editada',
+        TRANSACTION_DELETED: 'Transacción Eliminada',
+        EXCHANGE_RATE_UPDATED: 'Tasa de Cambio Actualizada',
     };
     return labels[type] || type;
 });
@@ -163,6 +167,14 @@ const formatValue = (value, fieldName) => {
     if (value === null || value === undefined) {
         return '---'; // O 'No aplica', 'Vacío', etc.
     }
+
+    // --- NUEVA LÓGICA PARA EL CAMPO 'type' ---
+    if (fieldName === 'type' && typeof value === 'string') {
+        if (value === 'income') return 'Ingreso';
+        if (value === 'expense') return 'Egreso';
+    }
+    // --- FIN NUEVA LÓGICA ---
+    
     if (typeof value === 'boolean') {
         return value ? 'Sí' : 'No';
     }

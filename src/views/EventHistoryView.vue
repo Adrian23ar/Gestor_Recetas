@@ -65,7 +65,11 @@ const getEventTypeLabel = (eventType) => {
         STOCK_MANUAL_EDIT: 'Stock Editado Manualmente',
         STOCK_ADJUST_BY_PRODUCTION_ADD: 'Stock Descontado por Producción',
         STOCK_ADJUST_BY_PRODUCTION_DELETE: 'Stock Restaurado (Prod. Eliminada)',
-        STOCK_ADJUST_BY_PRODUCTION_EDIT: 'Stock Ajustado por Edición de Prod.'
+        STOCK_ADJUST_BY_PRODUCTION_EDIT: 'Stock Ajustado por Edición de Prod.',
+        TRANSACTION_CREATED: 'Transacción Creada',
+        TRANSACTION_EDITED: 'Transacción Editada',
+        TRANSACTION_DELETED: 'Transacción Eliminada',
+        EXCHANGE_RATE_UPDATED: 'Tasa de Cambio Actualizada',
         // Añade más según tus eventType
     };
     return labels[eventType] || eventType;

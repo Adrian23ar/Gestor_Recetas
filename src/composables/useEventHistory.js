@@ -1,15 +1,11 @@
 // src/composables/useEventHistory.js
 import { ref } from 'vue';
 import { useAuth } from './useAuth';
-import { db } from '../main'; // Tu instancia de Firestore
+import { db } from '../main';
 import { collection, addDoc, serverTimestamp, Timestamp, writeBatch, doc } from "firebase/firestore";
 import { useLocalStorage } from './useLocalStorage';
 
-// Clave para localStorage
 const EVENT_HISTORY_STORAGE_KEY = 'eventHistoryLog';
-
-// Estado reactivo para el historial (si decides cargarlo aquí, aunque es más común cargarlo en la vista)
-// Por ahora, nos enfocaremos en la escritura.
 const eventHistoryLog = useLocalStorage(EVENT_HISTORY_STORAGE_KEY, []);
 const historyLoading = ref(false);
 const historyError = ref(null);
@@ -17,67 +13,89 @@ const historyError = ref(null);
 export function useEventHistory() {
     const { user } = useAuth();
 
-    /**
-     * Añade una entrada al historial de eventos.
-     * @param {Object} eventData - Objeto con los datos del evento.
-     * @param {import("firebase/firestore").WriteBatch} [existingBatch] - Un batch de Firestore existente para incluir esta escritura.
-     * @returns {Promise<string|null>} El ID de la entrada de historial creada o null si falla.
-     */
     async function addEventHistoryEntry(eventData, existingBatch = null) {
         if (!eventData.eventType || !eventData.entityType) {
             console.error("useEventHistory: eventType y entityType son requeridos.", eventData);
             return null;
         }
 
-        const newEntry = {
-            ...eventData, // Debe incluir entityId, entityName, changes, etc.
-            timestamp: user.value ? serverTimestamp() : new Date().toISOString(), // Firestore timestamp o ISO string
+        // Objeto base con la información del usuario y el timestamp correcto
+        const baseEntryInfo = {
+            timestamp: user.value ? serverTimestamp() : new Date().toISOString(),
             userId: user.value ? user.value.uid : null,
             userName: user.value ? (user.value.displayName || user.value.email) : 'Sistema (localStorage)',
         };
 
-        // Eliminar el ID si venía en eventData, ya que Firestore/localStorage lo generará
-        delete newEntry.id;
+        // Objeto con el resto de los datos del evento (sin timestamp, userId, userName, id)
+        const eventDetails = { ...eventData };
+        delete eventDetails.id;
+        delete eventDetails.timestamp; // Eliminar si accidentalmente se pasó
+        delete eventDetails.userId;
+        delete eventDetails.userName;
 
         if (user.value) {
+            const batch = existingBatch || writeBatch(db); // Usa el batch existente o crea uno nuevo
+            let historyDocRef;
             try {
                 const historyCollectionRef = collection(db, `users/${user.value.uid}/eventHistory`);
-                if (existingBatch) {
-                    const newDocRef = doc(historyCollectionRef); // Genera un ID para usar en el batch
-                    existingBatch.set(newDocRef, newEntry);
-                    console.log("useEventHistory: Entrada de historial añadida al batch de Firestore.");
-                    return newDocRef.id; // Devolvemos el ID que se usará en el batch
-                } else {
-                    const docRef = await addDoc(historyCollectionRef, newEntry);
-                    console.log("useEventHistory: Entrada de historial añadida a Firestore con ID:", docRef.id);
-                    return docRef.id;
+                historyDocRef = doc(historyCollectionRef); // Genera la referencia con ID
+
+                // --- MODIFICACIÓN CLAVE ---
+                // Crear el objeto para Firestore, AHORA incluyendo serverTimestamp()
+                // PERO asegurándonos de que se maneje correctamente.
+                // Firestore *sí* permite serverTimestamp a nivel raíz, el problema
+                // parece ser la combinación con arrays anidados DENTRO de la misma operación set/update en batch.
+                // Intentemos pasar el objeto completo con serverTimestamp() directamente.
+                // Si esto sigue fallando, el siguiente paso es reemplazarlo por null aquí
+                // y confiar en reglas de seguridad o triggers para poner el timestamp.
+
+                const entryToSaveInFirestore = {
+                    ...eventDetails, // changes, entityType, etc.
+                    ...baseEntryInfo // timestamp (serverTimestamp), userId, userName
+                };
+                // --- FIN MODIFICACIÓN CLAVE ---
+
+                batch.set(historyDocRef, entryToSaveInFirestore);
+                console.log("useEventHistory: Entrada de historial preparada para batch de Firestore.");
+
+                // Solo hacemos commit si creamos el batch aquí
+                if (!existingBatch) {
+                    await batch.commit();
+                    console.log("useEventHistory: Entrada de historial añadida a Firestore con ID:", historyDocRef.id);
                 }
+                return historyDocRef.id;
+
             } catch (e) {
-                console.error("useEventHistory: Error añadiendo entrada de historial a Firestore:", e, newEntry);
+                // Intentemos loguear el objeto problemático
+                const entryToSaveInFirestoreForError = {
+                    ...eventDetails,
+                    timestamp: "_SERVER_TIMESTAMP_PLACEHOLDER_", // Reemplazar para loguear
+                    userId: baseEntryInfo.userId,
+                    userName: baseEntryInfo.userName
+                };
+                console.error("useEventHistory: Error añadiendo entrada de historial a Firestore:", e, entryToSaveInFirestoreForError);
                 historyError.value = "Error al guardar historial en servidor.";
-                // Fallback a localStorage si Firestore falla? Podría ser una opción, pero puede complicar.
-                // Por ahora, solo logueamos el error.
                 return null;
             }
         } else {
-            // Guardar en localStorage
+            // Guardar en localStorage (sin cambios aquí)
             const newId = Date.now().toString() + Math.random().toString(36).substring(2, 9);
-            const entryWithId = { ...newEntry, id: newId, timestamp: new Date().toISOString() }; // Asegurar timestamp ISO y ID local
-
+            const entryWithId = {
+                ...eventDetails,
+                ...baseEntryInfo,
+                id: newId,
+                timestamp: new Date().toISOString() // Asegurar ISO string aquí
+            };
             const currentHistory = JSON.parse(localStorage.getItem(EVENT_HISTORY_STORAGE_KEY) || '[]');
-            currentHistory.unshift(entryWithId); // Añadir al principio para orden cronológico inverso
+            currentHistory.unshift(entryWithId);
             localStorage.setItem(EVENT_HISTORY_STORAGE_KEY, JSON.stringify(currentHistory));
-            // Actualizar la ref de useLocalStorage si se está usando directamente
             eventHistoryLog.value = currentHistory;
             console.log("useEventHistory: Entrada de historial añadida a localStorage con ID:", newId);
             return newId;
         }
     }
 
-    /**
-     * Obtiene todas las entradas del historial.
-     * (Implementación básica, podría necesitar paginación/filtros más adelante)
-     */
+    // ... (resto del composable: getEventHistory, export)
     async function getEventHistory() {
         historyLoading.value = true;
         historyError.value = null;
@@ -109,8 +127,8 @@ export function useEventHistory() {
 
     return {
         addEventHistoryEntry,
-        getEventHistory, // Aunque la vista del historial probablemente tendrá su propia lógica de carga
-        historyLoading,  // Estado de carga para la vista
-        historyError     // Estado de error para la vista
+        getEventHistory,
+        historyLoading,
+        historyError
     };
 }

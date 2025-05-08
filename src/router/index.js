@@ -17,11 +17,16 @@ const routes = [
     name: 'ProductionRegister',
     component: () => import('../views/RegisterView.vue'),
   },
-  // --- NUEVA RUTA PARA EL HISTORIAL DE EVENTOS ---
   {
-    path: '/historial', // Puedes usar '/event-history' o la URL que prefieras
+    path: '/historial',
     name: 'EventHistory',
-    component: () => import('../views/EventHistoryView.vue'), // Asegúrate que la ruta al componente sea correcta
+    component: () => import('../views/EventHistoryView.vue'),
+  },
+  // --- AÑADIR ESTA NUEVA RUTA ---
+  {
+    path: '/contabilidad', // La URL para el módulo de contabilidad
+    name: 'Accounting',     // Nombre de la ruta
+    component: () => import('../views/AccountingView.vue') // Apunta a tu nueva vista
   }
   // --- FIN NUEVA RUTA ---
 ];

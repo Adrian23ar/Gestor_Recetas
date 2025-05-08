@@ -82,6 +82,10 @@ const closeMobileMenu = () => {
             class="router-links hover:text-accent-500 px-3 py-2 rounded-md text-sm transition-colors duration-200 dark:text-dark-text-muted dark:hover:text-dark-accent-300">
             Historial
           </Router-link>
+          <RouterLink to="/contabilidad"
+            class="router-links hover:text-accent-500 px-3 py-2 rounded-md text-sm transition-colors duration-200 dark:text-dark-text-muted dark:hover:text-dark-accent-300">
+            Contabilidad
+          </RouterLink>
           <button @click="toggleDarkMode" class="px-3 py-2 cursor-pointer text-sm font-medium rounded-md focus:outline-none transition-colors duration-200
                          text-text-muted hover:text-accent-500 hover:bg-neutral-100
                          dark:text-dark-text-muted dark:hover:text-dark-accent-300 dark:hover:bg-neutral-700">
@@ -140,6 +144,10 @@ const closeMobileMenu = () => {
                 class="block hover:text-accent-600 hover:bg-neutral-100 px-3 py-2 rounded-md transition-colors duration-200 dark:text-dark-text-base dark:hover:text-dark-accent-300 dark:hover:bg-dark-neutral-800">
                 Historial
               </Router-link>
+              <RouterLink to="/contabilidad" @click="closeMobileMenu"
+                class="block hover:text-accent-600 hover:bg-neutral-100 px-3 py-2 rounded-md transition-colors duration-200 dark:text-dark-text-base dark:hover:text-dark-accent-300 dark:hover:bg-dark-neutral-800">
+                Contabilidad
+              </RouterLink>
 
               <button @click="toggleDarkMode();" class="block cursor-pointer text-text-base hover:text-accent-600 hover:bg-neutral-100 px-3 py-2 rounded-md font-medium transition-colors duration-200 w-full text-left
                               dark:text-dark-text-base dark:hover:text-dark-accent-300 dark:hover:bg-dark-neutral-800">
