@@ -933,10 +933,21 @@ async function saveProductionRecord(updatedRecordData) {
     }
 }
 
+// --- Bandera Anti-Concurrencia (Opcional pero recomendada) ---
+let isUserDataLoading = false;
+
+// --- Carga de Datos ---
 async function loadDataFromFirestore(userId) {
-    console.log(`useUserData: Iniciando carga desde Firestore para el usuario: ${userId}...`);
-    dataLoading.value = true; // <--- Poner en true
+    // Guarda anti-concurrencia
+    if (isUserDataLoading) {
+        console.log(`useUserData: Carga para ${userId || 'localStorage'} ya en progreso, omitiendo llamada duplicada.`);
+        return;
+    }
+    isUserDataLoading = true;
+    dataLoading.value = true; // Poner ANTES del try
     dataError.value = null;
+    console.log(`useUserData: Iniciando carga desde Firestore para el usuario: ${userId}...`);
+
     try {
         // Cargar Recetas
         const recipesColRef = collection(db, `users/${userId}/recipes`);
@@ -960,58 +971,62 @@ async function loadDataFromFirestore(userId) {
         console.error("useUserData: Error cargando datos de Firestore:", error);
         dataError.value = "Error al cargar datos del servidor.";
     } finally {
-        dataLoading.value = false; // <--- Poner en false al finalizar
-        console.log('useUserData: Finalizada carga desde Firestore. dataLoading = false.');
+        dataLoading.value = false;
+        isUserDataLoading = false; // Liberar bandera
+        console.log(`useUserData: Finalizada carga desde Firestore. dataLoading = ${dataLoading.value}`);
     }
 }
 
 // --- Observadores de Estado ---
-watch(authLoading, (newAuthLoadingValue) => {
-    console.log(`useUserData: authLoading cambió a: ${newAuthLoadingValue}`);
-    if (newAuthLoadingValue === false) { // Cuando la autenticación ha terminado de cargar
-        console.log(`useUserData: Autenticación finalizada. Usuario: ${user.value ? user.value.uid : 'null'}`);
-        if (user.value) {
-            loadDataFromFirestore(user.value.uid); // Carga datos de Firestore
-        } else {
-            // No hay usuario, cargar de localStorage y finalizar carga de datos
-            recipes.value = JSON.parse(localStorage.getItem('recipes') || '[]');
-            globalIngredients.value = JSON.parse(localStorage.getItem('globalIngredients') || '[]');
-            productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]');
-            dataLoading.value = false; // <--- Importante: finalizar carga
-            dataError.value = null;
-            console.log('useUserData: Autenticación finalizada sin usuario. Usando datos de localStorage. dataLoading = false.');
-        }
-    } else { // La autenticación está en proceso
-        dataLoading.value = true; // <--- Indicar que los datos de la app están cargando
-        dataError.value = null;
-        console.log('useUserData: Autenticación en proceso. dataLoading = true.');
-    }
-}, { immediate: true }); // immediate: true para que se ejecute al inicio
 
+// ÚNICO Watcher responsable de la carga inicial y cambios posteriores
+watch(authLoading, (newAuthLoadingValue, oldAuthLoadingValue) => {
+    console.log(`useUserData: authLoading cambió. Nuevo: ${newAuthLoadingValue}, Viejo: ${oldAuthLoadingValue}`);
+    if (newAuthLoadingValue === false && oldAuthLoadingValue === true) {
+        // Auth acaba de terminar de cargar
+        console.log(`useUserData: Auth resuelto. Usuario: ${user.value ? user.value.uid : 'null'}. Llamando a loadDataFromFirestore desde watch(authLoading).`);
+        loadDataFromFirestore(user.value ? user.value.uid : null);
+    } else if (newAuthLoadingValue === true) {
+        // Auth está cargando
+        if (!dataLoading.value) { // Solo si no estaba ya cargando
+            console.log("useUserData: authLoading es true, estableciendo dataLoading.");
+            dataLoading.value = true;
+            dataError.value = null;
+        }
+    }
+    // Si la llamada immediate es true y authLoading ya es false, este watcher no hará nada inicialmente.
+    // El estado inicial de `user` (null o el usuario) determinará la primera carga.
+}, { immediate: true });
+
+// Watcher SECUNDARIO para manejar el logout y cargar de localStorage
 watch(user, (newUser, oldUser) => {
-    // Este watcher es para manejar cambios *después* de la carga inicial de auth.
-    // El watcher de `authLoading` maneja la carga inicial.
-    console.log(`useUserData: watcher 'user' (cambio de estado): oldUser: ${oldUser ? oldUser.uid : 'null'}, newUser: ${newUser ? newUser.uid : 'null'}`);
-    if (!authLoading.value) { // Solo actuar si la carga inicial de auth ya terminó
-        if (newUser && !oldUser) {
-            // Usuario acaba de hacer login (después de estar deslogueado o ser el primer estado de usuario)
-            console.log('useUserData: Login detectado. Cargando datos de Firestore...');
-            loadDataFromFirestore(newUser.uid);
-        } else if (!newUser && oldUser) {
+    const newUid = newUser ? newUser.uid : null;
+    const oldUid = oldUser ? oldUser.uid : null;
+
+    // Solo actuar si hubo un cambio REAL (de usuario a null o viceversa)
+    // Y si la carga inicial de auth YA TERMINÓ
+    if (newUid !== oldUid && authLoading.value === false) {
+        if (!newUser && oldUser) {
             // Usuario acaba de hacer logout
-            console.log('useUserData: Logout detectado. Cargando desde localStorage.');
+            console.log('useUserData: Logout detectado POST-AUTH. Cargando desde localStorage.');
+            isUserDataLoading = false; // Resetear la guarda si estaba activa por alguna razón
+            dataLoading.value = true; // Mostrar carga mientras se lee localStorage (rápido pero por si acaso)
             recipes.value = JSON.parse(localStorage.getItem('recipes') || '[]');
             globalIngredients.value = JSON.parse(localStorage.getItem('globalIngredients') || '[]');
             productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]');
-            dataLoading.value = false; // Datos de localStorage cargados (o vacíos)
+            dataLoading.value = false;
             dataError.value = null;
             console.log('useUserData: Datos locales cargados post-logout. dataLoading = false.');
+        } else if (newUser && !oldUser) {
+            // Usuario acaba de hacer login (ya manejado por el watch de authLoading, pero puede servir de fallback)
+            console.log('useUserData: Login detectado POST-AUTH. loadDataFromFirestore debería haber sido llamado por watch(authLoading).');
+            // Opcionalmente, podrías forzar una carga aquí si sospechas que puede fallar:
+            if (!isUserDataLoading) { loadDataFromFirestore(newUid); }
         }
-        // Si newUser y oldUser son ambos no nulos pero diferentes, es un cambio de usuario (poco común sin logout).
-        // En ese caso, loadDataFromFirestore(newUser.uid) también debería llamarse.
-        // El watcher de `authLoading` con `immediate: true` ya cubre el caso de carga inicial.
+        // No necesitamos manejar el caso de user A -> user B aquí porque
+        // el watch(authLoading) ya disparó la carga con el user B.
     }
-});
+}, { deep: true }); // No necesita immediate: true
 
 // --- Export Composable ---
 export function useUserData() {

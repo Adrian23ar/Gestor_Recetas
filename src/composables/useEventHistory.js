@@ -95,20 +95,11 @@ export function useEventHistory() {
         }
     }
 
-    // ... (resto del composable: getEventHistory, export)
     async function getEventHistory() {
         historyLoading.value = true;
         historyError.value = null;
         try {
             if (user.value) {
-                // const historyColRef = collection(db, `users/${user.value.uid}/eventHistory`);
-                // const q = query(historyColRef, orderBy("timestamp", "desc")); // Ejemplo de ordenamiento
-                // const snapshot = await getDocs(q);
-                // eventHistoryLog.value = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                // Por ahora, retornamos el valor de localStorage que podría estar sincronizado si se usan listeners,
-                // o se podría implementar la carga directa aquí. Para la vista, es mejor cargarla allí.
-                // Esta función podría ser más para uso interno si es necesario.
-                // Para la vista del historial, es mejor que la vista misma gestione su propia carga.
                 console.warn("getEventHistory desde useEventHistory leerá de localStorage por ahora. La vista debería implementar su propia carga de Firestore.");
                 return JSON.parse(localStorage.getItem(EVENT_HISTORY_STORAGE_KEY) || '[]');
 

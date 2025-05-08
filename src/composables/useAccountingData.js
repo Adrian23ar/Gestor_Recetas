@@ -133,10 +133,19 @@ function _updateCurrentDailyRate() {
 }
 
 /** Carga los datos contables (transacciones y tasas) */
+let isLoadingData = false;
+
 async function loadAccountingData(userId) {
-    console.log(`useAccountingData: Iniciando carga contable para usuario: ${userId || 'localStorage'}...`);
+    // Guarda anti-concurrencia
+    if (isLoadingData) {
+        console.log(`useAccountingData: Carga para ${userId || 'localStorage'} ya en progreso, omitiendo llamada duplicada.`);
+        return;
+    }
+    isLoadingData = true;
     accountingLoading.value = true;
     accountingError.value = null;
+    console.log(`useAccountingData: Iniciando carga contable para usuario: ${userId || 'localStorage'}...`);
+
     try {
         if (userId) {
             const transactionsColRef = collection(db, `users/${userId}/transactions`);
@@ -171,6 +180,7 @@ async function loadAccountingData(userId) {
         currentDailyRate.value = null;
     } finally {
         accountingLoading.value = false;
+        isLoadingData = false; // Liberar la bandera
         console.log(`useAccountingData: Carga contable finalizada. accountingLoading = ${accountingLoading.value}`);
     }
 }
@@ -556,7 +566,6 @@ async function deleteTransaction(transactionId) {
     }
 }
 
-
 // --- Funciones de Cálculo y Filtrado (Plan C - básicas) ---
 
 function getFilteredTransactions(options = {}) {
@@ -596,27 +605,23 @@ function calculateSummary(filteredList) {
     };
 }
 
-
-// --- Watchers para Carga Inicial ---
-watch(authLoading, (newAuthLoadingValue) => {
-    if (newAuthLoadingValue === false) {
-        if (user.value) {
-            loadAccountingData(user.value.uid);
-        } else {
-            loadAccountingData(null); // Carga desde localStorage
-        }
-    } else {
-        accountingLoading.value = true;
-    }
-}, { immediate: true });
-
+// ÚNICO Watcher responsable de la carga inicial y cambios posteriores
 watch(user, (newUser, oldUser) => {
     const newUid = newUser ? newUser.uid : null;
     const oldUid = oldUser ? oldUser.uid : null;
-    if (!authLoading.value && newUid !== oldUid) { // Solo actuar si el usuario cambia *después* de carga inicial de auth
-        loadAccountingData(newUid); // Carga datos para el nuevo estado (null o userId)
+
+    // Cargar/Recargar siempre que el UID cambie o en la primera ejecución (immediate: true)
+    // La comparación newUid !== oldUid maneja cambios de login/logout
+    // La ejecución inicial por immediate: true maneja el estado al montar
+    if (newUid !== oldUid) {
+        console.log(`useAccountingData: Watcher 'user' detectó cambio (Old: ${oldUid}, New: ${newUid}). Llamando loadAccountingData(${newUid || 'null'}).`);
+        loadAccountingData(newUid);
     }
-});
+    // La primera vez que se ejecuta (immediate), si newUid === oldUid (ambos null o ambos el mismo usuario ya cargado),
+    // la condición if no se cumple, pero la carga inicial es necesaria.
+    // Por lo tanto, NO necesitamos un bloque `else if` aquí. La llamada inicial se hace abajo.
+
+}, { deep: true, immediate: true }); // immediate: true para la carga inicial
 
 
 // --- Exportar ---

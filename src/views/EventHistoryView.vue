@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue';
 import { useAuth } from '../composables/useAuth';
 import { db } from '../main';
 import { collection, getDocs, query, orderBy, limit, startAfter, onSnapshot } from 'firebase/firestore';
-import { useEventHistory } from '../composables/useEventHistory'; // Aún no lo usamos para leer, pero podría ser útil
+// import { useEventHistory } from '../composables/useEventHistory'; // Aún no lo usamos para leer, pero podría ser útil
 import EventDetailsModal from '../components/EventDetailsModal.vue'; // Ajusta la ruta
 
 // Importa DataTables y su CSS si no está global
@@ -14,18 +14,20 @@ import 'datatables.net-responsive-dt';
 DataTable.use(DataTablesCore);
 DataTable.use(DataTablesCore.Responsive);
 
-const { user } = useAuth();
-
+const { user, authLoading } = useAuth();
 const localHistoryEntries = ref([]); // Para entradas de localStorage o snapshot de Firestore
 const historyLoading = ref(true);
 const historyError = ref(null);
-
 const isDetailsModalVisible = ref(false);
 const selectedEventEntry = ref(null);
-
 const historyTableRef = ref(null); // Referencia para el elemento de la tabla
 let dtInstance = null; // Instancia de DataTables
+let unsubscribeSnapshot = null;
+const PAGE_SIZE = 100; // Cuántos cargar a la vez
+const lastVisibleDoc = ref(null);
+const allDataLoaded = ref(false);
 
+let initialLoadTriggered = false; // Bandera para evitar doble carga por watcher inmediato
 // --- Funciones para el Modal de Detalles ---
 const showDetails = (eventEntry) => {
     selectedEventEntry.value = eventEntry;
@@ -88,76 +90,87 @@ const formattedHistoryEntries = computed(() => {
 });
 
 
-// --- Lógica de Carga de Datos del Historial ---
-let unsubscribeSnapshot = null;
 
-const PAGE_SIZE = 100; // Cuántos cargar a la vez
-const lastVisibleDoc = ref(null);
-const allDataLoaded = ref(false);
+let isCurrentlyLoading = false; // Bandera anti-concurrencia
 
-async function loadHistory(loadMore = false) {
-    if (loadMore && allDataLoaded.value) return;
+// --- Lógica de Carga ---
+async function loadHistory(isLoadMore = false) {
+    // Guarda anti-concurrencia
+    if (isCurrentlyLoading) {
+        console.log("loadHistory: Carga ya en progreso, omitiendo.");
+        return;
+    }
+    if (isLoadMore && allDataLoaded.value) {
+        console.log("loadHistory: No más datos para cargar.");
+        return;
+    }
+
+    isCurrentlyLoading = true; // Marcar como ocupado
     historyLoading.value = true;
     historyError.value = null;
 
-    // No necesitamos desuscribirnos si solo cargamos lotes con getDocs
-    // Si usaras onSnapshot con paginación, sería más complejo
-
-    if (dtInstance && !loadMore) { // Si es una carga nueva (ej. cambio de usuario), destruir tabla
-        dtInstance.destroy();
-        dtInstance = null;
-        localHistoryEntries.value = []; // Limpiar datos anteriores
+    if (!isLoadMore) {
+        console.log("loadHistory: Iniciando carga completa / reseteo.");
+        localHistoryEntries.value = [];
         lastVisibleDoc.value = null;
         allDataLoaded.value = false;
+        if (dtInstance) {
+            dtInstance.destroy();
+            dtInstance = null;
+        }
+    } else {
+        console.log("loadHistory: Cargando más resultados...");
     }
 
     try {
-        if (user.value) {
+        const currentUserId = user.value ? user.value.uid : null;
+        if (currentUserId) {
+            // --- Lógica de Firestore ---
             let q = query(
-                collection(db, `users/${user.value.uid}/eventHistory`),
+                collection(db, `users/${currentUserId}/eventHistory`),
                 orderBy("timestamp", "desc"),
                 limit(PAGE_SIZE)
             );
-
-            if (loadMore && lastVisibleDoc.value) {
+            if (isLoadMore && lastVisibleDoc.value) {
+                // ¡CORRECCIÓN IMPORTANTE AQUÍ! Debes volver a construir la query completa
                 q = query(
-                    collection(db, `users/${user.value.uid}/eventHistory`),
+                    collection(db, `users/${currentUserId}/eventHistory`),
                     orderBy("timestamp", "desc"),
-                    startAfter(lastVisibleDoc.value), // Paginación
+                    startAfter(lastVisibleDoc.value), // Usar startAfter
                     limit(PAGE_SIZE)
                 );
             }
-
             const snapshot = await getDocs(q);
             const newEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-            if (loadMore) {
-                localHistoryEntries.value = [...localHistoryEntries.value, ...newEntries];
+            if (isLoadMore) {
+                localHistoryEntries.value.push(...newEntries);
             } else {
                 localHistoryEntries.value = newEntries;
             }
-
             lastVisibleDoc.value = snapshot.docs[snapshot.docs.length - 1] || null;
-            if (snapshot.docs.length < PAGE_SIZE) {
+            if (newEntries.length < PAGE_SIZE) {
                 allDataLoaded.value = true;
             }
-
-            console.log(`Historial cargado/actualizado: ${newEntries.length} nuevas entradas. Total: ${localHistoryEntries.value.length}`);
-
+            console.log(`Historial cargado/actualizado Firestore: ${newEntries.length} nuevas. Total: ${localHistoryEntries.value.length}. AllLoaded: ${allDataLoaded.value}`);
+            // ----------------------------------------
         } else {
-            // Para localStorage, la paginación tendría que ser simulada cortando el array
-            // O cargar todo si no es masivo. Por simplicidad, si es local, cargamos todo.
+            // --- Lógica de LocalStorage ---
             const storedHistory = JSON.parse(localStorage.getItem('eventHistoryLog') || '[]');
             localHistoryEntries.value = storedHistory.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            allDataLoaded.value = true; // Asumimos que todo se carga de localStorage
+            allDataLoaded.value = true;
+            console.log(`Historial cargado desde localStorage: ${localHistoryEntries.value.length} entradas. AllLoaded: ${allDataLoaded.value}`);
+            // -----------------------------------------
         }
     } catch (e) {
         console.error("Error cargando historial:", e);
         historyError.value = "No se pudo cargar el historial.";
+        allDataLoaded.value = true;
     } finally {
         historyLoading.value = false;
+        isCurrentlyLoading = false; // Liberar bandera
         nextTick(() => {
-            initializeDataTable(); // Ya no necesita el parámetro
+            initializeDataTable();
         });
     }
 }
@@ -290,13 +303,24 @@ function handleTableClick(event) {
 }
 
 onMounted(() => {
-    loadHistory(); // Carga inicial
-    // Observar cambios en el usuario para recargar el historial
-    watch(user, () => {
-        console.log("Cambio de usuario detectado en EventHistoryView, recargando historial.");
-        loadHistory();
-    }, { immediate: false }); // No immediate aquí, ya que authLoading lo maneja
+    console.log("EventHistoryView: onMounted. La carga inicial la maneja el watcher de 'user'.");
+    // NINGUNA llamada a loadHistory() aquí
 });
+
+// ÚNICO Watcher responsable de la carga inicial y cambios de usuario
+watch(user, (newUser, oldUser) => {
+    const newUid = newUser ? newUser.uid : null;
+    const oldUid = oldUser ? oldUser.uid : null;
+
+    // Cargar datos SIEMPRE que cambie el estado de autenticación (null vs user, o user A vs user B)
+    // La primera ejecución (immediate: true) manejará el estado inicial.
+    if (newUid !== oldUid) {
+        console.log(`EventHistoryView: Watcher 'user' detectó cambio (Old: ${oldUid}, New: ${newUid}). Llamando loadHistory(false).`);
+        loadHistory(false); // Carga completa/reseteo para el nuevo estado
+    }
+
+}, { deep: true, immediate: true }); // immediate: true es CLAVE
+
 
 onUnmounted(() => {
     if (unsubscribeSnapshot) {
