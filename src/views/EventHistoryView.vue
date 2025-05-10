@@ -72,6 +72,8 @@ const getEventTypeLabel = (eventType) => {
         TRANSACTION_EDITED: 'Transacción Editada',
         TRANSACTION_DELETED: 'Transacción Eliminada',
         EXCHANGE_RATE_UPDATED: 'Tasa de Cambio Actualizada',
+        EXCHANGE_RATE_CREATED: 'Tasa de Cambio Creada',
+        EXCHANGE_RATE_EDITED: 'Tasa de Cambio Editada',
         // Añade más según tus eventType
     };
     return labels[eventType] || eventType;
