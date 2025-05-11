@@ -99,6 +99,7 @@ mi-pasteleria-app/
 ├── tailwind.config.js       # Configuración de Tailwind CSS
 ├── vite.config.js           # Configuración de Vite
 └── README.md                # Este archivo
+```
 
 ## Configuración y Uso
 
