@@ -68,9 +68,10 @@ Esta es una aplicación web diseñada para la gestión integral de recetas, ingr
 
 ## Estructura del Proyecto (Simplificada)
 
+```text
 mi-pasteleria-app/
 ├── public/
-│   └── receta.ico             # Favicon
+│   └── receta.ico             # Favicon (inferido de index.html)
 ├── src/
 │   ├── assets/
 │   │   └── style.css          # Estilos globales y de Tailwind
@@ -82,19 +83,19 @@ mi-pasteleria-app/
 │   │   └── useUserData.js
 │   ├── router/
 │   │   └── index.js           # Configuración de rutas de Vue Router
-│   ├── views/                 # Componentes de página (Dashboard, Ingredients, etc.)
+│   ├── views/                 # Componentes de página (Vistas)
 │   │   ├── AccountingView.vue
 │   │   ├── DashboardView.vue
 │   │   ├── EventHistoryView.vue
 │   │   ├── IngredientsView.vue
-│   │   └── RegisterView.vue
+│   │   └── RegisterView.vue   # Para el registro de producción
 │   ├── App.vue                # Componente raíz de la aplicación
 │   └── main.js                # Punto de entrada, inicialización de Vue y Firebase
 ├── .vscode/
 │   └── extensions.json      # Recomendaciones de extensiones para VS Code
 ├── index.html               # Plantilla HTML principal
 ├── package.json             # Dependencias y scripts del proyecto
-├── package-lock.json
+├── package-lock.json        # Lockfile de dependencias
 ├── tailwind.config.js       # Configuración de Tailwind CSS
 ├── vite.config.js           # Configuración de Vite
 └── README.md                # Este archivo
