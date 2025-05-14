@@ -298,60 +298,109 @@ async function updateDailyRate(rateValue, dateString = null) {
 }
 
 // --- FUNCIÓN MODIFICADA PARA OBTENER TASA DEL BCV DESDE API ---
-async function fetchAndUpdateBCVRate() {
-    console.log("useAccountingData: Intentando obtener tasa del BCV para HOY desde la API...");
+async function fetchAndUpdateBCVRate(maxRetries = 5) { // maxRetries: ej. buscar hasta 5 días atrás
+    console.log(`useAccountingData: Buscando tasa BCV para HOY, con hasta ${maxRetries} reintentos hacia atrás.`);
     rateFetchingLoading.value = true;
-    accountingError.value = null; // Limpiar error general aquí también
+    accountingError.value = null; // Limpiar error general
 
-    const today = new Date();
-    const day = String(today.getDate()).padStart(2, '0');
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const year = today.getFullYear();
-    const formattedToday = `${day}-${month}-${year}`;
+    const originalTodayDate = new Date(); // Guardar la fecha original de "hoy"
+    const originalTodayYYYYMMDD = originalTodayDate.toISOString().split('T')[0];
 
-    const apiUrl = `https://pydolarve.org/api/v2/dollar/history?page=bcv&monitor=usd&start_date=${formattedToday}&end_date=${formattedToday}&format_date=default&rounded_price=true&order=desc`;
+    let currentDateToTry = new Date(originalTodayDate); // Empezar con hoy
     const apiToken = 'ZCp_K35_WZUYeTJWoJLYcA';
 
-    try {
-        console.log("useAccountingData: Llamando API para tasa de HOY:", apiUrl);
-        const response = await fetch(apiUrl, {
-            headers: { Authorization: `Bearer ${apiToken}` }
-        });
-        const responseBodyForDebug = await response.text();
-        if (!response.ok) {
-            let errorData;
-            try { errorData = JSON.parse(responseBodyForDebug); } catch (e) { /* no es json */ }
-            console.error("useAccountingData: Error de API (HOY):", response.status, errorData || responseBodyForDebug);
-            throw new Error(`Error API (HOY): ${response.status}. ${errorData?.message || responseBodyForDebug}`);
+    for (let i = 0; i <= maxRetries; i++) {
+        if (i > 0) { // Si no es el primer intento, retroceder un día
+            currentDateToTry.setDate(currentDateToTry.getDate() - 1);
         }
-        const data = JSON.parse(responseBodyForDebug);
-        console.log("useAccountingData: Respuesta API BCV (HOY):", data);
 
-        if (data && data.history && data.history.length > 0) {
-            const latestRateEntry = data.history[0];
-            const bcvUsdRate = parseFloat(latestRateEntry.price);
-            const [datePartApi] = latestRateEntry.last_update.split(',');
-            const [dayApi, monthApi, yearApi] = datePartApi.split('/');
-            const apiDateString = `${yearApi}-${monthApi.padStart(2, '0')}-${dayApi.padStart(2, '0')}`;
+        const year = currentDateToTry.getFullYear();
+        const month = String(currentDateToTry.getMonth() + 1).padStart(2, '0');
+        const day = String(currentDateToTry.getDate()).padStart(2, '0');
 
-            if (bcvUsdRate && !isNaN(bcvUsdRate) && bcvUsdRate > 0) {
-                console.log(`useAccountingData: Tasa USD BCV (HOY) obtenida: ${bcvUsdRate} para ${apiDateString}`);
-                await updateDailyRate(bcvUsdRate, apiDateString);
-            } else {
-                accountingError.value = "Tasa USD del BCV (HOY) no válida en API.";
-                console.error(accountingError.value, latestRateEntry);
+        const formattedApiDateForQuery = `${day}-${month}-${year}`; // DD-MM-YYYY para la API
+        const dateAttemptingYYYYMMDD = `${year}-${month}-${day}`; // YYYY-MM-DD para logs y potencial uso
+
+        const apiUrl = `https://pydolarve.org/api/v2/dollar/history?page=bcv&monitor=usd&start_date=${formattedApiDateForQuery}&end_date=${formattedApiDateForQuery}&format_date=default&rounded_price=true&order=desc`;
+
+        try {
+            console.log(`useAccountingData (fetchAndUpdateBCVRate): Intento ${i + 1}. API para fecha: ${dateAttemptingYYYYMMDD} (Query: ${formattedApiDateForQuery})`);
+            const response = await fetch(apiUrl, {
+                headers: { Authorization: `Bearer ${apiToken}` }
+            });
+            const responseBodyForDebug = await response.text();
+
+            if (!response.ok) {
+                let errorData;
+                try { errorData = JSON.parse(responseBodyForDebug); } catch (e) { /* no es json */ }
+                console.warn(`useAccountingData (fetchAndUpdateBCVRate): Error API intento ${i + 1} para ${dateAttemptingYYYYMMDD}: ${response.status}`, errorData || responseBodyForDebug);
+                if (i === maxRetries) { // Si es el último reintento
+                    throw new Error(`Error API final (${response.status}) para ${dateAttemptingYYYYMMDD}: ${errorData?.message || responseBodyForDebug}`);
+                }
+                accountingError.value = `API no disponible para ${dateAttemptingYYYYMMDD}.`; // Error temporal
+                continue;
             }
-        } else {
-            accountingError.value = "No se encontró historial de tasas para hoy en la API del BCV.";
-            console.warn(accountingError.value, data);
+
+            const data = JSON.parse(responseBodyForDebug);
+            // console.log(`useAccountingData (fetchAndUpdateBCVRate): Respuesta API para ${dateAttemptingYYYYMMDD}:`, data);
+
+            if (data && data.history && data.history.length > 0) {
+                const latestRateEntry = data.history[0];
+                const bcvUsdRate = parseFloat(latestRateEntry.price);
+
+                // La fecha de la tasa según la API (last_update)
+                const [datePartApi] = latestRateEntry.last_update.split(',');
+                const [dayApi, monthApi, yearApi] = datePartApi.split('/');
+                const apiDateRateIsValidForYYYYMMDD = `${yearApi}-${monthApi.padStart(2, '0')}-${dayApi.padStart(2, '0')}`;
+
+
+                if (bcvUsdRate && !isNaN(bcvUsdRate) && bcvUsdRate > 0) {
+                    console.log(`useAccountingData (fetchAndUpdateBCVRate): Tasa ENCONTRADA: ${bcvUsdRate} (corresponde al ${apiDateRateIsValidForYYYYMMDD}). Se aplicará para HOY (${originalTodayYYYYMMDD}).`);
+
+                    // IMPORTANTE: Guardar la tasa encontrada (que puede ser de un día anterior)
+                    // con la FECHA DE HOY (originalTodayYYYYMMDD).
+                    await updateDailyRate(bcvUsdRate, originalTodayYYYYMMDD);
+
+                    // También es bueno guardar la tasa para su fecha real si aún no existe,
+                    // para enriquecer los datos históricos.
+                    if (originalTodayYYYYMMDD !== apiDateRateIsValidForYYYYMMDD) {
+                        // Solo llama a updateDailyRate si no es la misma fecha para evitar doble log/escritura
+                        await updateDailyRate(bcvUsdRate, apiDateRateIsValidForYYYYMMDD);
+                    }
+
+                    rateFetchingLoading.value = false;
+                    accountingError.value = null; // Limpiar cualquier error temporal
+                    return; // Salir del bucle y de la función, tasa encontrada y aplicada
+                } else {
+                    console.warn(`useAccountingData (fetchAndUpdateBCVRate): Tasa no válida en API para ${dateAttemptingYYYYMMDD}.`, latestRateEntry);
+                }
+            } else {
+                console.warn(`useAccountingData (fetchAndUpdateBCVRate): No historial en API para ${dateAttemptingYYYYMMDD}.`);
+            }
+            accountingError.value = `No hay tasa API para ${dateAttemptingYYYYMMDD}.`; // Mensaje temporal
+
+        } catch (error) {
+            console.error(`useAccountingData (fetchAndUpdateBCVRate): Catch Error intento ${i + 1} para ${dateAttemptingYYYYMMDD}:`, error);
+            accountingError.value = error.message || `Error procesando tasa para ${dateAttemptingYYYYMMDD}.`;
+            if (i === maxRetries) { // Si es el último reintento y falló
+                rateFetchingLoading.value = false;
+                // No hacer nada más, el error ya está seteado. currentDailyRate mantendrá el último valor válido.
+                return;
+            }
         }
-    } catch (error) {
-        console.error("useAccountingData: Error al obtener/procesar tasa del BCV (HOY):", error);
-        accountingError.value = error.message || "Error desconocido al obtener tasa de API (HOY).";
-    } finally {
-        rateFetchingLoading.value = false;
     }
+
+    // Si el bucle termina sin encontrar una tasa
+    rateFetchingLoading.value = false;
+    // accountingError ya tiene el mensaje del último intento fallido, o el mensaje de abajo si todos fueron "no historial".
+    if (!accountingError.value || accountingError.value.startsWith("No hay tasa API para")) {
+        accountingError.value = `No se encontró tasa en API para hoy (${originalTodayYYYYMMDD}) ni en los ${maxRetries} días anteriores.`;
+    }
+    console.log(`useAccountingData (fetchAndUpdateBCVRate): ${accountingError.value}`);
+    // currentDailyRate se actualizará (o no) basado en lo que updateDailyRate haya hecho o no.
+    // Si no se encontró nada, currentDailyRate mantendrá su valor previo (que podría ser de una carga anterior).
 }
+// --- FIN FUNCIÓN MODIFICADA ---
 // --- FIN FUNCIÓN MODIFICADA ---
 
 // --- FUNCIÓN MODIFICADA PARA OBTENER TASA DE UNA FECHA ESPECÍFICA (CON REINTENTOS HACIA ATRÁS) ---
