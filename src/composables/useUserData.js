@@ -131,6 +131,8 @@ function getFieldLabel(key) {
         recipeId: 'Receta Asociada',
         totalRevenue: 'Ingresos Totales',
         totalCost: 'Costo Total de Producción',
+        operatingCostRecipeOnly: 'Gastos Op. (Ingr. + Emp.)', // NUEVO
+        laborCostForBatch: 'Costo Mano de Obra (Lote)',    // NUEVO
         // Labels for ingredient changes (from getIngredientChangeDetails)
         'ingredient_removed': 'Ingrediente Eliminado',
         'ingredient_added': 'Ingrediente Añadido',
@@ -530,14 +532,15 @@ async function addProductionRecord(recordData) {
         recipeId: recordData.recipeId || null,
         productName: recordData.productName || 'Desconocido',
         batchSize: Number(recordData.batchSize) || 0,
-        date: recordData.date || new Date().toISOString().split('T')[0], // Default to today
+        date: recordData.date || new Date().toISOString().split('T')[0],
         totalRevenue: Number(recordData.totalRevenue) || 0,
-        totalCost: Number(recordData.totalCost) || 0,
-        netProfit: Number(recordData.netProfit) || 0
+        operatingCostRecipeOnly: Number(recordData.recipeOnlyCost) || 0,
+        laborCostForBatch: Number(recordData.laborCost) || 0,
+        netProfit: Number(recordData.netProfit) || 0,
     };
 
-    const stockUpdateDetails = []; // [{ ingredientId, ingredientName, oldStock, newStock, quantityChanged }]
-    const originalIngredientStatesForRollback = []; // [{ index, oldStock }]
+    const stockUpdateDetails = [];
+    const originalIngredientStatesForRollback = [];
 
     if (recordToAdd.recipeId && recordToAdd.batchSize > 0) {
         const recipeUsed = recipes.value.find(r => r.id === recordToAdd.recipeId);
@@ -572,7 +575,18 @@ async function addProductionRecord(recordData) {
         try {
             const productionColRef = collection(db, `users/${user.value.uid}/production`);
             const newRecordDocRef = doc(productionColRef);
-            batch.set(newRecordDocRef, recordToAdd);
+
+            const firestoreRecordData = {
+                recipeId: recordToAdd.recipeId,
+                productName: recordToAdd.productName,
+                batchSize: recordToAdd.batchSize,
+                date: recordToAdd.date,
+                totalRevenue: recordToAdd.totalRevenue,
+                operatingCostRecipeOnly: recordToAdd.operatingCostRecipeOnly, // Guardar este
+                laborCostForBatch: recordToAdd.laborCostForBatch,         // Guardar este
+                netProfit: recordToAdd.netProfit
+            };
+            batch.set(newRecordDocRef, firestoreRecordData);
 
             await addEventHistoryEntry({
                 eventType: 'PRODUCTION_RECORD_CREATED',
@@ -605,7 +619,7 @@ async function addProductionRecord(recordData) {
             await batch.commit();
 
             const firestoreId = newRecordDocRef.id;
-            const localRecord = { ...recordData, ...recordToAdd, id: firestoreId }; // Use processed data, ensure ID
+            const localRecord = { ...recordData, ...recordToAdd, id: firestoreId };
             const localIndex = productionRecords.value.findIndex(r => r.id === tempId);
             if (localIndex !== -1) {
                 productionRecords.value.splice(localIndex, 1, localRecord);
@@ -625,6 +639,17 @@ async function addProductionRecord(recordData) {
     } else {
         // localStorage
         const finalId = tempId || `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // localStorage
+        const firestoreRecordData = { // Reutiliza la estructura definida para firestore para consistencia
+            recipeId: recordToAdd.recipeId,
+            productName: recordToAdd.productName,
+            batchSize: recordToAdd.batchSize,
+            date: recordToAdd.date,
+            totalRevenue: recordToAdd.totalRevenue,
+            operatingCostRecipeOnly: recordToAdd.operatingCostRecipeOnly,
+            laborCostForBatch: recordToAdd.laborCostForBatch,
+            netProfit: recordToAdd.netProfit
+        };
         const localRecord = { ...recordData, ...recordToAdd, id: finalId };
 
         await addEventHistoryEntry({
@@ -792,9 +817,12 @@ async function saveProductionRecord(updatedRecordData) {
         ...updatedRecordData,
         batchSize: Number(updatedRecordData.batchSize) || 0,
         totalRevenue: Number(updatedRecordData.totalRevenue) || 0,
-        totalCost: Number(updatedRecordData.totalCost) || 0,
+        operatingCostRecipeOnly: Number(updatedRecordData.operatingCostRecipeOnly) || 0, // USAR ESTE
+        laborCostForBatch: Number(updatedRecordData.laborCostForBatch) || 0,         // USAR ESTE
         netProfit: Number(updatedRecordData.netProfit) || 0,
     };
+    // Y asegurar que si recipeOrBatchChanged, estos costos se recalculan correctamente si es necesario.
+    // Por ahora, si EditProductionModal no los modifica, tomará los valores que ya tenga el updatedRecordData.
 
 
     // --- Stock Adjustment Logic for Edit ---
@@ -964,7 +992,15 @@ async function loadDataFromFirestore(userId) {
 
             const productionColRef = collection(db, `users/${userId}/production`);
             const productionSnapshot = await getDocs(productionColRef);
-            productionRecords.value = productionSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, netProfit: Number(doc.data().netProfit) || 0 }));
+            productionRecords.value = productionSnapshot.docs.map(doc => ({
+                ...doc.data(),
+                id: doc.id,
+                batchSize: Number(doc.data().batchSize) || 0, // Asegurar todos los números
+                totalRevenue: Number(doc.data().totalRevenue) || 0,
+                operatingCostRecipeOnly: Number(doc.data().operatingCostRecipeOnly) || 0,
+                laborCostForBatch: Number(doc.data().laborCostForBatch) || 0,
+                netProfit: Number(doc.data().netProfit) || 0
+            }));
 
             console.log(`useUserData: Datos de Firestore cargados.`);
         } catch (error) {
@@ -982,7 +1018,14 @@ async function loadDataFromFirestore(userId) {
         console.log('useUserData: No hay usuario, cargando datos desde localStorage via loadDataFromFirestore.');
         recipes.value = JSON.parse(localStorage.getItem('recipes') || '[]');
         globalIngredients.value = JSON.parse(localStorage.getItem('globalIngredients') || '[]');
-        productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]');
+        productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]').map(record => ({
+            ...record,
+            batchSize: Number(record.batchSize) || 0, // Asegurar todos los números
+            totalRevenue: Number(record.totalRevenue) || 0,
+            operatingCostRecipeOnly: Number(record.operatingCostRecipeOnly) || 0,
+            laborCostForBatch: Number(record.laborCostForBatch) || 0,
+            netProfit: Number(record.netProfit) || 0
+        }));
         console.log('useUserData: Datos de localStorage cargados.');
         isUserDataLoading = false; // Indicar que ya no está cargando específicamente para Firestore
         dataLoading.value = false;
@@ -1007,7 +1050,14 @@ watch(authLoading, (newAuthLoadingValue, oldAuthLoadingValue) => {
                 dataLoading.value = true; // Mostrar carga mientras se lee localStorage
                 recipes.value = JSON.parse(localStorage.getItem('recipes') || '[]');
                 globalIngredients.value = JSON.parse(localStorage.getItem('globalIngredients') || '[]');
-                productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]');
+                productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]').map(record => ({
+                    ...record,
+                    batchSize: Number(record.batchSize) || 0, // Asegurar todos los números
+                    totalRevenue: Number(record.totalRevenue) || 0,
+                    operatingCostRecipeOnly: Number(record.operatingCostRecipeOnly) || 0,
+                    laborCostForBatch: Number(record.laborCostForBatch) || 0,
+                    netProfit: Number(record.netProfit) || 0
+                }));
                 dataLoading.value = false;
                 dataError.value = null;
                 isUserDataLoading = false; // Asegurarse que no está en estado de "cargando de Firestore"
@@ -1037,7 +1087,14 @@ watch(user, (newUser, oldUser) => {
             dataLoading.value = true; // Mostrar carga mientras se lee localStorage (rápido pero por si acaso)
             recipes.value = JSON.parse(localStorage.getItem('recipes') || '[]');
             globalIngredients.value = JSON.parse(localStorage.getItem('globalIngredients') || '[]');
-            productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]');
+            productionRecords.value = JSON.parse(localStorage.getItem('productionRecords') || '[]').map(record => ({
+                ...record,
+                batchSize: Number(record.batchSize) || 0, // Asegurar todos los números
+                totalRevenue: Number(record.totalRevenue) || 0,
+                operatingCostRecipeOnly: Number(record.operatingCostRecipeOnly) || 0,
+                laborCostForBatch: Number(record.laborCostForBatch) || 0,
+                netProfit: Number(record.netProfit) || 0
+            }));
             dataLoading.value = false;
             dataError.value = null;
             console.log('useUserData: Datos locales cargados post-logout. dataLoading = false.');

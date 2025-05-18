@@ -16,33 +16,28 @@ const props = defineProps({
         required: true,
     }
 });
-
 const emit = defineEmits(['close', 'save']);
 
 // --- Estado Local del Modal ---
-// Creamos una copia profunda reactiva de la receta para editarla sin afectar la original hasta guardar.
 const editableRecipe = ref(null);
-// Estado para el selector de ingredientes
 const selectedIngredientId = ref('');
 const newIngredientQuantity = ref(null);
 
-// Observamos cambios en la prop 'recipe' para inicializar/reiniciar el estado editable
 watch(() => props.recipe, (newRecipe) => {
     if (newRecipe) {
         editableRecipe.value = JSON.parse(JSON.stringify(newRecipe));
-        // Asegurar valores numéricos y añadir defaults para nuevos campos si no existen
         editableRecipe.value.packagingCostPerBatch = Number(editableRecipe.value.packagingCostPerBatch) || 0;
         editableRecipe.value.laborCostPerBatch = Number(editableRecipe.value.laborCostPerBatch) || 0;
         editableRecipe.value.itemsPerBatch = Number(editableRecipe.value.itemsPerBatch) || 1;
-        editableRecipe.value.profitMarginPercent = Number(editableRecipe.value.profitMarginPercent) || 0; // Default 0%
-        editableRecipe.value.lossBufferPercent = Number(editableRecipe.value.lossBufferPercent) || 0;     // Default 0%
+        editableRecipe.value.profitMarginPercent = Number(editableRecipe.value.profitMarginPercent) || 0;
+        editableRecipe.value.lossBufferPercent = Number(editableRecipe.value.lossBufferPercent) || 0;
         if (!Array.isArray(editableRecipe.value.ingredients)) {
             editableRecipe.value.ingredients = [];
         }
     } else {
         editableRecipe.value = null;
     }
-}, { immediate: true }); // immediate: true para ejecutar al montar
+}, { immediate: true });
 
 // --- Lógica de Ingredientes de la Receta ---
 function addRecipeIngredient() {
@@ -50,19 +45,15 @@ function addRecipeIngredient() {
         alert('Selecciona un ingrediente y especifica una cantidad válida mayor a cero.');
         return;
     }
-    // Evitar duplicados (opcional, podrías permitir añadir el mismo ingrediente varias veces si tiene sentido)
     const existing = editableRecipe.value.ingredients.find(ing => ing.ingredientId === selectedIngredientId.value);
     if (existing) {
         alert('Este ingrediente ya está en la receta. Puedes modificar su cantidad o eliminarlo.');
         return;
     }
-
     editableRecipe.value.ingredients.push({
         ingredientId: selectedIngredientId.value,
         quantity: parseFloat(newIngredientQuantity.value),
     });
-
-    // Resetear campos del formulario de añadir ingrediente
     selectedIngredientId.value = '';
     newIngredientQuantity.value = null;
 }
@@ -73,7 +64,6 @@ function removeRecipeIngredient(ingredientIdToRemove) {
     );
 }
 
-// Obtener detalles completos de un ingrediente de la receta para mostrar
 function getIngredientDetails(recipeIngredient) {
     const global = props.globalIngredients.find(g => g.id === recipeIngredient.ingredientId);
     return global ? { ...global, quantityInRecipe: recipeIngredient.quantity } : null;
@@ -81,51 +71,76 @@ function getIngredientDetails(recipeIngredient) {
 
 // --- Cálculos Reactivos de Costos (Computed Properties) ---
 const calculatedCosts = computed(() => {
-    const defaults = { totalIngredientCost: 0, totalBatchCost: 0, costPerItem: 0, sellingPrice: 0, finalPrice: 0, ingredientCosts: {} };
+    const defaults = {
+        totalIngredientCost: 0,          // Costo total de ingredientes para el lote
+        recipeOnlyCost: 0,               // NUEVO: Costo total de la receta (solo ingredientes + empaque) para el lote
+        laborCostPerIndividualItem: 0,   // NUEVO: Costo de mano de obra por ítem individual
+        baseCostPerIndividualItem: 0,    // MODIFICADO: Costo base por ítem (solo ingredientes + empaque por ítem)
+        totalCostPerIndividualItem: 0,   // Costo total por ítem individual (base + mano de obra), usado para PVP
+        sellingPrice: 0,                 // Precio de Venta Sugerido por ítem
+        finalPrice: 0,                   // Precio Final por ítem
+        ingredientCosts: {}              // Costos detallados por ingrediente
+    };
+
     if (!editableRecipe.value || !props.globalIngredients) {
         return defaults;
     }
 
-    let totalIngredientCost = 0;
-    const ingredientCosts = {};
+    let calculatedTotalIngredientCost = 0;
+    const calculatedIngredientCosts = {};
 
     editableRecipe.value.ingredients.forEach(recipeIng => {
         const globalIng = props.globalIngredients.find(g => g.id === recipeIng.ingredientId);
         if (globalIng && globalIng.presentationSize > 0) {
             const costPerBaseUnit = globalIng.cost / globalIng.presentationSize;
-            const ingredientCost = costPerBaseUnit * recipeIng.quantity;
-            totalIngredientCost += ingredientCost;
-            ingredientCosts[recipeIng.ingredientId] = ingredientCost;
+            const ingredientCostForRecipe = costPerBaseUnit * recipeIng.quantity;
+            calculatedTotalIngredientCost += ingredientCostForRecipe;
+            calculatedIngredientCosts[recipeIng.ingredientId] = ingredientCostForRecipe;
         } else {
-            // If ingredient not found or presentation size is 0, treat its cost contribution as 0
-            ingredientCosts[recipeIng.ingredientId] = 0;
+            calculatedIngredientCosts[recipeIng.ingredientId] = 0;
         }
     });
 
-    const packagingCost = Number(editableRecipe.value.packagingCostPerBatch || 0);
-    const laborCost = Number(editableRecipe.value.laborCostPerBatch || 0);
-    const itemsPerBatch = Number(editableRecipe.value.itemsPerBatch || 1);
-    const profitMargin = Number(editableRecipe.value.profitMarginPercent || 0);
-    const lossBuffer = Number(editableRecipe.value.lossBufferPercent || 0);
+    const packagingCostPerBatch = Number(editableRecipe.value.packagingCostPerBatch || 0);
+    const laborCostPerBatch = Number(editableRecipe.value.laborCostPerBatch || 0);
+    const itemsPerBatch = Number(editableRecipe.value.itemsPerBatch || 1); // Evitar división por cero
+    const profitMarginPercent = Number(editableRecipe.value.profitMarginPercent || 0);
+    const lossBufferPercent = Number(editableRecipe.value.lossBufferPercent || 0);
 
-    const totalBatchCost = totalIngredientCost + packagingCost + laborCost;
-    const costPerItem = itemsPerBatch > 0 ? totalBatchCost / itemsPerBatch : 0;
+    // 1. Costo Total por Receta (solo ingredientes y empaque del lote)
+    // Este es el "Costo Total por Receta" que solo suma ingredientes y empaque.
+    const currentRecipeOnlyCost = calculatedTotalIngredientCost + packagingCostPerBatch;
 
-    // Calcular Precio de Venta (costo + ganancia)
-    const sellingPrice = costPerItem * (1 + profitMargin / 100);
+    // 2. Costo de Mano de Obra por Item Individual
+    // El costo total de la mano de obra se dividirá entre el lote de producción.
+    const currentLaborCostPerIndividualItem = itemsPerBatch > 0 ? laborCostPerBatch / itemsPerBatch : 0;
 
-    // Calcular Precio Final (precio de venta + margen de pérdida/buffer)
-    const finalPrice = sellingPrice * (1 + lossBuffer / 100);
+    // 3. Costo Base por Item Individual (ingredientes + empaque, por ítem)
+    // Este es el "Costo Base por Item individual" solicitado.
+    const currentBaseCostPerIndividualItem = itemsPerBatch > 0 ? currentRecipeOnlyCost / itemsPerBatch : 0;
+
+    // 4. Costo Total por Item Individual (para cálculo de precio de venta)
+    // Este es la suma de (ingredientes + empaque por ítem) + (mano de obra por ítem)
+    const currentTotalCostPerIndividualItem = currentBaseCostPerIndividualItem + currentLaborCostPerIndividualItem;
+
+    // 5. Calcular Precio de Venta (basado en el costo total por ítem individual + ganancia)
+    const currentSellingPrice = currentTotalCostPerIndividualItem * (1 + profitMarginPercent / 100);
+
+    // 6. Calcular Precio Final (precio de venta + margen de pérdida/buffer)
+    const currentFinalPrice = currentSellingPrice * (1 + lossBufferPercent / 100);
 
     return {
-        totalIngredientCost,    // Sumatoria de costos individuales de los ingredientes (ingredientCosts)
-        totalBatchCost, // Es el monto total de la receta
-        costPerItem,    // Es el costo de cada item que sale de la receta
-        sellingPrice,   // Es el precio sugerido, que es el costo de cada item + el % de ganancia
-        finalPrice,     // Es el precio final, que es el precio sugerido + el % de pérdida/buffer
-        ingredientCosts // Es un objeto que contiene los costos individuales de cada ingrediente
+        totalIngredientCost: calculatedTotalIngredientCost,
+        recipeOnlyCost: currentRecipeOnlyCost,
+        laborCostPerIndividualItem: currentLaborCostPerIndividualItem,
+        baseCostPerIndividualItem: currentBaseCostPerIndividualItem,
+        totalCostPerIndividualItem: currentTotalCostPerIndividualItem,
+        sellingPrice: currentSellingPrice,
+        finalPrice: currentFinalPrice,
+        ingredientCosts: calculatedIngredientCosts
     };
 });
+
 
 // --- Funciones del Modal ---
 function closeModal() {
@@ -145,7 +160,6 @@ function saveChanges() {
         alert("El nombre de la receta no puede estar vacío.");
         return;
     }
-    // Basic validation for costs and margins
     if (editableRecipe.value.packagingCostPerBatch === null || editableRecipe.value.laborCostPerBatch === null || editableRecipe.value.profitMarginPercent === null || editableRecipe.value.lossBufferPercent === null) {
         alert("Por favor, completa todos los campos numéricos de costos y márgenes.");
         return;
@@ -156,16 +170,23 @@ function saveChanges() {
     }
 
     if (editableRecipe.value && calculatedCosts.value) {
-         editableRecipe.value.calculatedTotalCost = calculatedCosts.value.totalBatchCost;
-         editableRecipe.value.calculatedFinalPrice = calculatedCosts.value.finalPrice;
-         // Puedes añadir costPerItem también si lo necesitas en otro lado
-         // editableRecipe.value.calculatedCostPerItem = calculatedCosts.value.costPerItem;
+        const laborCostForBatch = Number(editableRecipe.value.laborCostPerBatch || 0);
+        // "Costo Total por Receta (Ingr. + Emp. por Lote)"
+        editableRecipe.value.calculatedRecipeOnlyCost = calculatedCosts.value.recipeOnlyCost; // NUEVO CAMPO GUARDADO
+
+        // "Costo Mano de Obra (por Lote)" ya está en editableRecipe.value.laborCostPerBatch
+
+        // "Costo Total del Lote (Ingr. + Emp. + M.O.)"
+        editableRecipe.value.calculatedTotalBatchCostAllIncluded = calculatedCosts.value.recipeOnlyCost + laborCostForBatch; // RENOMBRADO PARA CLARIDAD
+
+        // "Precio Final por Item"
+        editableRecipe.value.calculatedFinalPrice = calculatedCosts.value.finalPrice;
     }
 
 
-    // Emitimos el evento 'save' con la copia modificada de la receta
+
     emit('save', { ...editableRecipe.value });
-    closeModal(); // Cerramos el modal después de guardar
+    closeModal();
 }
 
 // --- Helper para formato ---
@@ -200,7 +221,7 @@ function formatCurrency(value) {
                     </div>
 
                     <div class="border border-neutral-300 rounded-md p-4
-                                dark:border-dark-neutral-700">
+                                 dark:border-dark-neutral-700">
                         <h4 class="text-lg font-medium mb-3 text-primary-700
                                    dark:text-dark-primary-300">Ingredientes de la Receta</h4>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-3 bg-neutral-100 rounded
@@ -212,21 +233,20 @@ function formatCurrency(value) {
                                     :options="globalIngredients" :searchable="true" valueProp="id" label="name"
                                     trackBy="name" :clearOnSelect="true" :closeOnSelect="true" placeholder="Buscar..."
                                     noOptionsText="Lista vacía o no encontrada"
-                                    noResultsText="No se encontraron ingredientes" :classes="{ /* Aquí puedes sobreescribir clases de Tailwind si es necesario */
+                                    noResultsText="No se encontraron ingredientes" :classes="{
                                         container: 'relative mx-auto w-full flex items-center justify-end box-border cursor-pointer border border-neutral-300 rounded-md bg-contrast text-base leading-snug outline-none mt-1 dark:border-dark-neutral-700 dark:bg-dark-contrast',
-                                        containerActive: 'ring-2 ring-accent-500/50 border-accent-500 dark:ring-dark-accent-400/50 dark:border-dark-accent-400', // Añadir anillo de foco
+                                        containerActive: 'ring-2 ring-accent-500/50 border-accent-500 dark:ring-dark-accent-400/50 dark:border-dark-accent-400',
                                         singleLabelText: 'overflow-ellipsis overflow-hidden block whitespace-nowrap max-w-full text-text-base dark:text-dark-text-base',
                                         placeholder: 'flex items-center h-full absolute left-0 top-0 pointer-events-none bg-transparent leading-snug pl-3.5 text-text-muted dark:text-dark-text-muted',
                                         dropdown: 'absolute -left-px -right-px bottom-0 transform translate-y-full border border-neutral-300 -mt-px overflow-y-auto z-50 bg-contrast flex flex-col rounded-b-md dark:border-dark-neutral-700 dark:bg-dark-contrast',
                                         dropdownHidden: 'hidden',
                                         option: 'flex items-center justify-start box-border text-left cursor-pointer text-base leading-snug py-2 px-3 text-text-base dark:text-dark-text-base',
-                                        optionPointed: 'text-neutral-800 bg-neutral-200 dark:text-dark-neutral-100 dark:bg-dark-neutral-700', // Hover/focused option
+                                        optionPointed: 'text-neutral-800 bg-neutral-200 dark:text-dark-neutral-100 dark:bg-dark-neutral-700',
                                         optionSelected: 'text-accent-700 bg-accent-100 dark:text-dark-accent-100 dark:bg-dark-accent-600',
                                         optionDisabled: 'text-neutral-400 cursor-not-allowed dark:text-dark-neutral-500',
                                         noOptions: 'py-2 px-3 text-text-muted text-left dark:text-dark-text-muted',
                                         noResults: 'py-2 px-3 text-text-muted text-left dark:text-dark-text-muted',
-                                        search: 'w-full absolute inset-0 outline-none focus:ring-0 appearance-none box-border border-0 text-base font-sans bg-white  dark:bg-dark-contrast rounded pl-3.5 rtl:pl-0 rtl:pr-3.5',
-
+                                        search: 'w-full absolute inset-0 outline-none focus:ring-0 appearance-none box-border border-0 text-base font-sans bg-white dark:bg-dark-contrast rounded pl-3.5 rtl:pl-0 rtl:pr-3.5',
                                     }">
                                     <template #option="{ option }">
                                         <div>{{ option.name }}</div>
@@ -239,7 +259,7 @@ function formatCurrency(value) {
                             </div>
                             <div>
                                 <label for="ingredient-qty" class="block text-sm font-medium text-text-base
-                                                               dark:text-dark-text-base">Cantidad (en Receta):</label>
+                                                              dark:text-dark-text-base">Cantidad (en Receta):</label>
                                 <input type="number" id="ingredient-qty" v-model.number="newIngredientQuantity"
                                     min="0.01" step="any" placeholder="Ej: 125" class="mt-1 block w-full px-3 bg-contrast py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm
                                            dark:border-dark-neutral-700 dark:bg-dark-contrast dark:text-dark-text-base
@@ -276,7 +296,7 @@ function formatCurrency(value) {
                                         </span>
                                     </span>
                                     <button @click="removeRecipeIngredient(recipeIng.ingredientId)" class="bg-danger-600 text-white px-2 py-1 rounded hover:bg-danger-700 text-xs transition-all font-medium
-                                               dark:bg-danger-700 dark:text-dark-text-base dark:hover:bg-danger-800">
+                                                 dark:bg-danger-700 dark:text-dark-text-base dark:hover:bg-danger-800">
                                         Quitar
                                     </button>
                                 </template>
@@ -298,7 +318,8 @@ function formatCurrency(value) {
                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                             <div>
                                 <label for="packaging-cost" class="block text-sm font-medium text-text-base
-                                                               dark:text-dark-text-base">Costo Empaque ($):</label>
+                                                                 dark:text-dark-text-base">Costo Empaque (por Lote
+                                    $):</label>
                                 <input type="number" id="packaging-cost"
                                     v-model.number="editableRecipe.packagingCostPerBatch" min="0" step="0.01" class="mt-1 block w-full px-3 py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm
                                            dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base
@@ -306,7 +327,8 @@ function formatCurrency(value) {
                             </div>
                             <div>
                                 <label for="labor-cost" class="block text-sm font-medium text-text-base
-                                                               dark:text-dark-text-base">Mano de Obra ($):</label>
+                                                               dark:text-dark-text-base">Mano de Obra (por Lote
+                                    $):</label>
                                 <input type="number" id="labor-cost" v-model.number="editableRecipe.laborCostPerBatch"
                                     min="0" step="0.01" class="mt-1 block w-full px-3 py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm
                                            dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base
@@ -340,29 +362,42 @@ function formatCurrency(value) {
                     </div>
 
                     <div class="border border-neutral-300 rounded-md p-4 bg-secondary-100
-                                dark:border-dark-neutral-700 dark:bg-dark-secondary-950">
+                                 dark:border-dark-neutral-700 dark:bg-dark-secondary-950">
                         <h4 class="text-lg font-medium mb-3 text-primary-700
                                    dark:text-dark-primary-200">Resumen Financiero Sugerido</h4>
                         <div class="space-y-1 text-sm text-text-base
-                                    dark:text-dark-text-base">
-                            <p>Costo Total Ingredientes: <span class="font-semibold">{{
+                                     dark:text-dark-text-base">
+
+                            <p>Costo Total Ingredientes (por Lote): <span class="font-semibold">{{
                                 formatCurrency(calculatedCosts.totalIngredientCost)
                                     }}</span></p>
-                            <p>Costo Total Empaque: <span class="font-semibold">{{
+                            <p>Costo Total Empaque (por Lote): <span class="font-semibold">{{
                                 formatCurrency(editableRecipe.packagingCostPerBatch || 0)
                                     }}</span></p>
-                            <p>Costo Total Mano de Obra: <span class="font-semibold">{{
-                                formatCurrency(editableRecipe.laborCostPerBatch ||
-                                    0) }}</span></p>
+                            <p>Costo Total Mano de Obra (por Lote): <span class="font-semibold">{{
+                                formatCurrency(editableRecipe.laborCostPerBatch || 0) }}</span></p>
+
                             <p class="border-t border-neutral-200 pt-1 mt-1
-                                      dark:border-dark-neutral-700">Costo Total por Receta: <span
-                                    class="font-semibold">{{
-                                        formatCurrency(calculatedCosts.totalBatchCost) }}</span></p>
-                            <hr class="my-2 border-neutral-200
                                        dark:border-dark-neutral-700">
-                            <p>Costo Base por Item Individual: <span class="font-semibold">{{
-                                formatCurrency(calculatedCosts.costPerItem)
+                                <strong>Costo Total por Receta (Ingr. + Emp. por Lote):</strong>
+                                <span class="font-semibold">{{ formatCurrency(calculatedCosts.recipeOnlyCost) }}</span>
+                            </p>
+
+                            <hr class="my-2 border-neutral-200 dark:border-dark-neutral-700">
+
+                            <p>Costo Mano de Obra por Item Individual: <span class="font-semibold">{{
+                                formatCurrency(calculatedCosts.laborCostPerIndividualItem)
                                     }}</span></p>
+
+                            <p>Costo Base por Item Individual (Ingr. + Emp.): <span class="font-semibold">{{
+                                formatCurrency(calculatedCosts.baseCostPerIndividualItem)
+                                    }}</span></p>
+
+                            <p class="text-text-muted dark:text-dark-text-muted">
+                                (Costo Total Unitario para PVP: <span class="font-semibold">{{
+                                    formatCurrency(calculatedCosts.totalCostPerIndividualItem) }}</span>)
+                            </p>
+
                             <p>+ Margen Ganancia ({{ editableRecipe.profitMarginPercent || 0 }}%): <span
                                     class="font-semibold">{{
                                         formatCurrency(calculatedCosts.sellingPrice) }}</span> (PVP Sugerido)</p>
@@ -372,7 +407,6 @@ function formatCurrency(value) {
                                                 }}</span> (Precio Final)</p>
                         </div>
                     </div>
-
                 </div>
                 <div class="flex justify-end pt-4 border-t border-neutral-200 mt-4 space-x-3
                             dark:border-dark-neutral-700">
@@ -389,5 +423,4 @@ function formatCurrency(value) {
             </div>
         </div>
     </Transition>
-
 </template>

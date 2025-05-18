@@ -24,7 +24,7 @@ export function setupAuthListener(authInstance) {
                     // Puedes añadir otras propiedades que utilices, por ejemplo:
                     // providerId: rawFirebaseUser.providerData[0]?.providerId, // Para saber si es google.com, etc.
                 };
-                console.log("Datos del usuario procesados:", currentUserData);
+                // console.log("Datos del usuario procesados:", currentUserData);
                 user.value = currentUserData;
             } else {
                 user.value = null;
