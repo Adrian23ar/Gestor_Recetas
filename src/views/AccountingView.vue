@@ -110,64 +110,12 @@
             No hay transacciones registradas para el periodo seleccionado.
         </div>
         <div v-else class="bg-contrast rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg overflow-x-auto">
-            <table class="w-full text-sm text-left">
-                <thead
-                    class="text-xs text-text-muted uppercase bg-neutral-100 dark:text-dark-text-muted dark:bg-dark-neutral-800">
-                    <tr>
-                        <th scope="col" class="px-4 py-2">Fecha</th>
-                        <th scope="col" class="px-4 py-2">Tipo</th>
-                        <th scope="col" class="px-4 py-2">Descripción</th>
-                        <th scope="col" class="px-4 py-2">Categoría</th>
-                        <th scope="col" class="px-4 py-2 text-right">Monto (Bs.)</th>
-                        <th scope="col" class="px-4 py-2 text-right">Tasa (Bs/USD)</th>
-                        <th scope="col" class="px-4 py-2 text-right">Monto (USD)</th>
-                        <th scope="col" class="px-4 py-2 text-center">Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="tx in filteredTransactions" :key="tx.id"
-                        class="bg-contrast border-b last:border-b-0 dark:bg-dark-contrast dark:border-dark-neutral-700">
-                        <td class="px-4 py-2 whitespace-nowrap">{{ formatDate(tx.date) }}</td>
-                        <td class="px-4 py-2">
-                            <span
-                                :class="tx.type === 'income' ? 'text-success-700 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'">
-                                {{ tx.type === 'income' ? 'Ingreso' : 'Egreso' }}
-                            </span>
-                        </td>
-                        <td class="px-4 py-2">{{ tx.description }}</td>
-                        <td class="px-4 py-2">{{ tx.category }}</td>
-                        <td class="px-4 py-2 text-right">{{ formatCurrency(tx.amountBs, 'Bs.') }}</td>
-                        <td class="px-4 py-2 text-right">{{ tx.exchangeRate ? tx.exchangeRate.toFixed(2) : 'N/A'
-                        }}</td>
-                        <td class="px-4 py-2 text-right">{{ formatCurrency(tx.amountUsd, '$') }}</td>
-                        <td class="px-4 py-2 text-center space-x-2 whitespace-nowrap">
-                            <button @click="openEditModal(tx)"
-                                class="px-2 py-0.5 text-xs font-medium rounded bg-secondary-600 text-white hover:bg-secondary-700 dark:bg-dark-secondary-500 dark:hover:bg-dark-secondary-600">Editar</button>
-                            <button @click="openConfirmDelete(tx)"
-                                class="px-2 py-0.5 text-xs font-medium rounded bg-danger-600 text-white hover:bg-danger-700 dark:bg-danger-700 dark:hover:bg-danger-800">Borrar</button>
-                        </td>
-                    </tr>
-                </tbody>
-                <tfoot v-if="filteredTransactions.length > 0">
-                    <tr class="bg-neutral-100 dark:bg-dark-neutral-800 font-semibold">
-                        <td colspan="4" class="px-4 py-2 text-right">Totales del Periodo:</td>
-                        <td class="px-4 py-2 text-right">
-                            <span
-                                :class="summary.netBalance >= 0 ? 'text-success-700 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'">
-                                {{ formatCurrency(summary.netBalance, 'Bs.') }}
-                            </span>
-                        </td>
-                        <td colspan="1" class="px-4 py-2 text-right"></td>
-                        <td class="px-4 py-2 text-right">
-                            <span
-                                :class="totalUsdMovimientos >= 0 ? 'text-success-700 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'">
-                                {{ formatCurrency(totalUsdMovimientos, '$') }}
-                            </span>
-                        </td>
-                        <td></td>
-                    </tr>
-                </tfoot>
-            </table>
+            <!-- Replace old table with the new component -->
+            <AccountingTransactionsTable
+                :records="filteredTransactions"
+                @edit-transaction="openEditModal"
+                @delete-transaction="openConfirmDelete"
+            />
         </div>
 
         <TransactionModal :show="isTransactionModalOpen" :transaction-data="editingTransaction"
@@ -184,6 +132,7 @@ import { ref, computed, onMounted, watch } from 'vue'; // Añadido onMounted y w
 import { useAccountingData } from '../composables/useAccountingData';
 import TransactionModal from '../components/TransactionModal.vue';
 import ConfirmationModal from '../components/ConfirmationModal.vue';
+import AccountingTransactionsTable from '../components/AccountingTransactionsTable.vue'; // Import new component
 import { useToast } from 'vue-toastification';
 
 const toast = useToast();
