@@ -60,7 +60,7 @@
                     </button>
                 </div>
                 <p v-if="rateUpdateError" class="text-xs text-danger-600 dark:text-danger-400 mt-1">{{ rateUpdateError
-                    }}</p>
+                }}</p>
                 <p v-if="accountingError && !rateUpdateError" class="text-xs text-danger-600 dark:text-danger-400 mt-1">
                     Error API: {{ accountingError }}
                 </p>
@@ -111,11 +111,8 @@
         </div>
         <div v-else class="bg-contrast rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg overflow-x-auto">
             <!-- Replace old table with the new component -->
-            <AccountingTransactionsTable
-                :records="filteredTransactions"
-                @edit-transaction="openEditModal"
-                @delete-transaction="openConfirmDelete"
-            />
+            <AccountingTransactionsTable :records="filteredTransactions" @edit-transaction="openEditModal"
+                @delete-transaction="openConfirmDelete" />
         </div>
 
         <TransactionModal :show="isTransactionModalOpen" :transaction-data="editingTransaction"
