@@ -1,156 +1,36 @@
 <script setup>
-import { ref, watch, computed } from 'vue'; // Importa computed
-import { useUserData } from '../composables/useUserData.js';
+import { useDashboard } from '../composables/useDashboard.js';
+// Importar componentes usados en template
 import RecipeCard from '../components/RecipeCard.vue';
-import EditRecipeModal from '../components/EditRecipeModal.vue';
 import AddRecipeModal from '../components/AddRecipeModal.vue';
+import EditRecipeModal from '../components/EditRecipeModal.vue';
 import ConfirmationModal from '../components/ConfirmationModal.vue';
-import { useToast } from "vue-toastification";
+// Desestructuramos todo desde el composable para usar en template y lógica
+const {
+  recipes,
+  globalIngredients,
+  dataLoading,
+  dataError,
 
-// --- Estado ---
-// Asegúrate de obtener 'recipes' del composable
-const { recipes, globalIngredients, dataLoading, dataError, deleteRecipe, saveRecipe, addRecipe } = useUserData();
+  isEditModalOpen,
+  editingRecipe,
+  isAddModalOpen,
 
-const isEditModalOpen = ref(false);
-const editingRecipe = ref(null);
-const isAddModalOpen = ref(false);
+  showDeleteRecipeModal,
+  recipeToDeleteName,
 
-// --- Estado para el Modal de Confirmación de Eliminación de Receta ---
-const showDeleteRecipeModal = ref(false);
-const recipeToDelete = ref(null); // To store the recipe object to be deleted
+  openAddRecipeModal,
+  closeAddRecipeModal,
+  handleAddRecipe,
 
-// --- Toast Instance ---
-const toast = useToast();
+  openEditRecipeModal,
+  closeEditRecipeModal,
+  handleSaveRecipe,
 
-// Watch for data errors and show a toast
-watch(dataError, (errorMsg) => {
-  if (errorMsg) {
-    toast.error(errorMsg);
-  }
-});
-
-// --- Computed property for delete confirmation message ---
-// *** Corregido: Usar recipeToDelete y la lista de recipes ***
-const recipeToDeleteName = computed(() => {
-  if (!recipeToDelete.value) {
-    return ''; // Return empty if no recipe is selected for deletion
-  }
-  // Find the recipe by its ID in the list of recipes from the composable
-  const recipe = recipes.value.find(rec => rec.id === recipeToDelete.value.id);
-  return recipe ? recipe.name : 'esta receta'; // Fallback text
-});
-
-
-// --- Funciones ---
-
-// Abre el modal de añadir
-function openAddRecipeModal() {
-  isAddModalOpen.value = true;
-}
-
-// Cierra el modal de añadir
-function handleCloseAddModal() {
-  isAddModalOpen.value = false;
-}
-
-// Maneja la adición desde el modal
-async function handleAddRecipe(newRecipeName) {
-  if (!newRecipeName.trim()) {
-    toast.warning('El nombre de la receta no puede estar vacío.');
-    return;
-  }
-
-  const tempId = Date.now().toString(); // ID temporal único
-  const tempRecipe = {
-    id: tempId,
-    name: newRecipeName,
-    ingredients: [],
-    packagingCostPerBatch: 0,
-    laborCostPerBatch: 0,
-    itemsPerBatch: 1,
-    profitMarginPercent: 0,
-    lossBufferPercent: 0
-  };
-
-  // ✅ Actualización optimista del estado local
-  recipes.value.push(tempRecipe);
-
-  try {
-    const success = await addRecipe(tempRecipe);
-    if (success) {
-      toast.success(`Receta '${tempRecipe.name}' añadida exitosamente.`);
-    }
-  } catch (error) {
-    console.error("Error al añadir receta:", error);
-    toast.error("No se pudo añadir la receta. Inténtalo de nuevo.");
-  }
-}
-
-// --- Funciones del Modal de Confirmación de Eliminación de Receta ---
-
-// Solicita confirmación antes de eliminar una receta
-function requestDeleteRecipeConfirmation(recipeId) {
-  const recipe = recipes.value.find(r => r.id === recipeId);
-  if (recipe) {
-    recipeToDelete.value = recipe; // Store the recipe object
-    showDeleteRecipeModal.value = true; // Show the confirmation modal
-  } else {
-    toast.error("Receta no encontrada para eliminar.");
-  }
-}
-
-// Confirma la eliminación de la receta (llamada desde el modal)
-async function confirmRecipeDeletion() {
-  if (recipeToDelete.value) {
-    const recipeId = recipeToDelete.value.id;
-    // const recipeName = recipeToDelete.value.name; // Get name for toast BEFORE setting to null
-
-    showDeleteRecipeModal.value = false;
-    recipeToDelete.value = null; // Clear immediately
-
-    try {
-      // The composable deleteRecipe already returns the name
-      const recipeName = await deleteRecipe(recipeId);
-      toast.success(`Receta '${recipeName}' eliminada exitosamente.`);
-    } catch (error) {
-      console.error("DashboardView: Error during recipe deletion:", error);
-    }
-  }
-}
-
-// Cancela la eliminación de la receta (llamada desde el modal)
-function cancelRecipeDeletion() {
-  showDeleteRecipeModal.value = false;
-  recipeToDelete.value = null; // Clear the stored recipe
-}
-
-
-// --- Funciones del Modal de Edición ---
-function handleEditRecipe(recipeToEdit) {
-  editingRecipe.value = recipeToEdit;
-  isEditModalOpen.value = true;
-}
-
-function handleCloseEditModal() {
-  isEditModalOpen.value = false;
-  editingRecipe.value = null;
-}
-
-async function handleSaveChanges(updatedRecipe) {
-  // Basic validation before saving (modal might do some)
-  if (!updatedRecipe.name || !Array.isArray(updatedRecipe.ingredients)) {
-    toast.warning('Datos de receta incompletos para guardar.');
-    return;
-  }
-
-  // The composable saveRecipe updates the local state and saves async
-  await saveRecipe(updatedRecipe); // Save via composable async
-
-  toast.success(`Receta '${updatedRecipe.name}' actualizada exitosamente.`); // Keep toast here for component feedback
-
-  handleCloseEditModal(); // Close modal after save attempt
-}
-
+  requestDeleteRecipeConfirmation,
+  cancelRecipeDeletion,
+  confirmRecipeDeletion,
+} = useDashboard();
 </script>
 
 <template>
@@ -179,20 +59,35 @@ async function handleSaveChanges(updatedRecipe) {
     </div>
     <TransitionGroup v-else tag="div" name="card-list"
       class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-      <RecipeCard v-for="recipe in recipes" :key="recipe.id" :recipe="recipe" :globalIngredients="globalIngredients"
-        @delete-recipe="requestDeleteRecipeConfirmation" @edit-recipe="handleEditRecipe(recipe)" />
+      <RecipeCard
+        v-for="recipe in recipes"
+        :key="recipe.id"
+        :recipe="recipe"
+        :globalIngredients="globalIngredients"
+        @delete-recipe="requestDeleteRecipeConfirmation"
+        @edit-recipe="openEditRecipeModal(recipe)"
+      />
     </TransitionGroup>
 
-    <AddRecipeModal :show="isAddModalOpen" @close="handleCloseAddModal" @add="handleAddRecipe" />
+    <AddRecipeModal :show="isAddModalOpen" @close="closeAddRecipeModal" @add="handleAddRecipe" />
 
-    <EditRecipeModal v-if="isEditModalOpen && editingRecipe" :show="isEditModalOpen" :recipe="editingRecipe"
-      :globalIngredients="globalIngredients" @close="handleCloseEditModal" @save="handleSaveChanges" />
+    <EditRecipeModal
+      v-if="isEditModalOpen && editingRecipe"
+      :show="isEditModalOpen"
+      :recipe="editingRecipe"
+      :globalIngredients="globalIngredients"
+      @close="closeEditRecipeModal"
+      @save="handleSaveRecipe"
+    />
 
-    <ConfirmationModal :show="showDeleteRecipeModal" title="Confirmar Eliminación de Receta"
+    <ConfirmationModal
+      :show="showDeleteRecipeModal"
+      title="Confirmar Eliminación de Receta"
       :message="`¿Estás seguro de que deseas eliminar la receta '${recipeToDeleteName}'? Esta acción no se puede deshacer.`"
       confirmButtonText="Sí, Eliminar Receta"
       confirmButtonClass="bg-danger-600 hover:bg-danger-700 focus:ring-danger-500 dark:bg-danger-700 dark:hover:bg-danger-800 dark:focus:ring-danger-600 dark:text-dark-text-base"
-      @close="cancelRecipeDeletion" @confirm="confirmRecipeDeletion" />
-
+      @close="cancelRecipeDeletion"
+      @confirm="confirmRecipeDeletion"
+    />
   </div>
 </template>

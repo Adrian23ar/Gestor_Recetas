@@ -977,7 +977,7 @@ async function loadDataFromFirestore(userId) {
     dataError.value = null;
 
     if (userId) { // Cuando hay un usuario conectado
-        console.log(`useUserData: Iniciando carga desde Firestore para el usuario: ${userId}...`);
+        // console.log(`useUserData: Iniciando carga desde Firestore para el usuario: ${userId}...`);
         try {
             // Tu lógica actual para cargar desde Firestore...
             // Ejemplo para recetas:
@@ -1002,7 +1002,7 @@ async function loadDataFromFirestore(userId) {
                 netProfit: Number(doc.data().netProfit) || 0
             }));
 
-            console.log(`useUserData: Datos de Firestore cargados.`);
+            // console.log(`useUserData: Datos de Firestore cargados.`);
         } catch (error) {
             console.error("useUserData: Error cargando datos de Firestore:", error);
             dataError.value = "Error al cargar datos del servidor.";
@@ -1037,11 +1037,11 @@ async function loadDataFromFirestore(userId) {
 
 // ÚNICO Watcher responsable de la carga inicial y cambios posteriores
 watch(authLoading, (newAuthLoadingValue, oldAuthLoadingValue) => {
-    console.log(`useUserData: authLoading cambió. Nuevo: ${newAuthLoadingValue}, Viejo: ${oldAuthLoadingValue}`);
+    // console.log(`useUserData: authLoading cambió. Nuevo: ${newAuthLoadingValue}, Viejo: ${oldAuthLoadingValue}`);
     if (newAuthLoadingValue === false) { // Auth resuelto
         const currentUserId = user.value ? user.value.uid : null;
         if (currentUserId) {
-            console.log(`useUserData: Auth resuelto. Usuario: <span class="math-inline">\{currentUserId\}\. Llamando a loadDataFromFirestore\(</span>{currentUserId}).`);
+            // console.log(`useUserData: Auth resuelto. Usuario: <span class="math-inline">\{currentUserId\}\. Llamando a loadDataFromFirestore\(</span>{currentUserId}).`);
             loadDataFromFirestore(currentUserId);
         } else {
             // Usuario está desconectado y la autenticación ha finalizado.

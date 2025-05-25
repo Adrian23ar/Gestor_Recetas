@@ -51,7 +51,7 @@ function formatCurrency(value) {
 </script>
 
 <template>
-  <div class="bg-contrast rounded-lg shadow-md p-4 flex flex-col justify-between
+  <div class="bg-stone-100 rounded-lg shadow-md p-4 flex flex-col justify-between
               transition-all duration-300 ease-in-out
               hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02]
               dark:bg-dark-contrast dark:shadow-xl dark:hover:shadow-2xl">

@@ -771,21 +771,20 @@ function getFilteredTransactions(options = {}) {
 }
 
 function calculateSummary(filteredList) {
-    let totalIncome = 0;
-    let totalExpenses = 0;
-    filteredList.forEach(tx => {
+    const summary = filteredList.reduce((acc, tx) => {
         if (tx.type === 'income') {
-            totalIncome += tx.amountBs || 0;
+            acc.totalIncome += tx.amountBs || 0;
         } else if (tx.type === 'expense') {
-            totalExpenses += tx.amountBs || 0;
+            acc.totalExpenses += tx.amountBs || 0;
         }
-    });
-    return {
-        totalIncome,
-        totalExpenses,
-        netBalance: totalIncome - totalExpenses
-    };
+        return acc;
+    }, { totalIncome: 0, totalExpenses: 0, netBalance: 0 });
+
+    summary.netBalance = summary.totalIncome - summary.totalExpenses;
+
+    return summary;
 }
+
 
 // Watcher para cargar datos iniciales y cuando cambia el usuario/auth
 watch(
