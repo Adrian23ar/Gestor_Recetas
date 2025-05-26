@@ -81,7 +81,7 @@
                             </button>
                         </p>
                         <p>Monto USD (Calculado): <strong class="dark:text-dark-secondary-300">${{ amountUsdDisplay
-                        }}</strong></p>
+                                }}</strong></p>
                     </div>
 
                     <div>
@@ -132,7 +132,7 @@ const {
 } = useAccountingData();
 
 const defaultFormData = () => ({
-    id: null, type: 'expense', date: new Date().toISOString().split('T')[0],
+    id: null, type: 'income', date: new Date().toISOString().split('T')[0],
     description: '', category: '', amountBs: null,
     exchangeRate: null, amountUsd: 0, notes: '',
 });
