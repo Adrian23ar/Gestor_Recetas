@@ -11,7 +11,7 @@ export function useProductionRecords() {
         globalIngredients,
         addProductionRecord,
         deleteProductionRecord,
-        saveProductionRecord,
+        saveProductionRecord, // This function will implicitly handle the new isSold field
         saveIngredient,
         dataLoading,
         dataError,
@@ -94,6 +94,7 @@ export function useProductionRecords() {
                 recipeOnlyCost: recipeOnlyCostForProduction,
                 laborCost: laborCostForProduction,
                 netProfit: gananciaNeta,
+                isSold: false, // NUEVO: Inicializar isSold para nuevos registros
             };
 
             const recordAddedSuccess = await addProductionRecord(recordToAdd);
@@ -135,7 +136,7 @@ export function useProductionRecords() {
         }, "No se pudo eliminar el registro.");
     }
 
-    async function saveChanges(updatedRecord) {
+    async function saveChanges(updatedRecord) { // updatedRecord ya contendrá isSold desde el modal
         if (!updatedRecord.productName || updatedRecord.batchSize === null || !updatedRecord.date || updatedRecord.netProfit === null) {
             toast.warning('Por favor, completa todos los campos antes de guardar.');
             return false;
@@ -148,9 +149,11 @@ export function useProductionRecords() {
             toast.warning('La ganancia neta debe ser un número válido.');
             return false;
         }
+        // No es necesaria una validación específica para updatedRecord.isSold aquí,
+        // ya que es un booleano y su valor (true/false) es siempre válido.
 
         return await runAsync(async () => {
-            await saveProductionRecord(updatedRecord);
+            await saveProductionRecord(updatedRecord); // saveProductionRecord debe estar preparado para guardar el campo isSold
             toast.success(`Registro de '${updatedRecord.productName}' actualizado exitosamente.`);
             closeEditModal();
             return true;
@@ -167,7 +170,7 @@ export function useProductionRecords() {
         recordToDelete.value = null;
     }
     function openEditModal(record) {
-        editingRecord.value = record;
+        editingRecord.value = record; // record ya podría tener isSold si fue previamente guardado
         showEditModal.value = true;
     }
     function closeEditModal() {
@@ -175,8 +178,10 @@ export function useProductionRecords() {
         editingRecord.value = null;
     }
 
+    console.log(productionRecords.value);
+
     return {
-        productionRecords,
+        productionRecords, // Estos registros ahora deben incluir isSold
         recipes,
         dataLoading,
         dataError,
