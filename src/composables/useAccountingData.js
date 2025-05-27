@@ -785,32 +785,64 @@ function calculateSummary(filteredList) {
     return summary;
 }
 
+// NEW: Add a ref to track what context data has been loaded for
+const dataLoadedForContext = ref(null); // Will store user UID or 'local'
 
-// Watcher para cargar datos iniciales y cuando cambia el usuario/auth
 watch(
-    () => ({ u: user.value, al: authLoading.value }), // Observa un objeto con user y authLoading
-    (currentState, prevState) => {
-        const currentUid = currentState.u ? currentState.u.uid : null;
+    () => ({ user: user.value, authIsLoading: authLoading.value }),
+    (newState, oldState) => {
+        const newUserId = newState.user ? newState.user.uid : null;
+        const oldUserId = oldState?.user ? oldState.user.uid : null;
 
-        console.log(`useAccountingData: Watcher combinado activado. User: ${currentUid}, AuthLoading: ${currentState.al}`);
+        console.log(
+          `useAccountingData: Watcher triggered. AuthLoading: ${newState.authIsLoading}, User: ${newUserId}, Previously Loaded for: ${dataLoadedForContext.value}`
+        );
 
-        if (currentState.al === false) { // Solo proceder si la autenticación está resuelta
-            // Esto se activará en la carga inicial (cuando authLoading pase a false)
-            // y también cuando el usuario inicie o cierre sesión.
-            console.log(`useAccountingData: Auth resuelto. Llamando loadAccountingData(${currentUid || 'null'}).`);
-            loadAccountingData(currentUid); // loadAccountingData ya maneja la lógica de Firestore vs localStorage
-        } else if (currentState.al === true) {
-            // La autenticación está en proceso
-            if (!accountingLoading.value) {
-                accountingLoading.value = true;
-                accountingError.value = null;
-                console.log(`useAccountingData: Auth está cargando. Estableciendo accountingLoading a true.`);
+        // If authentication is still in progress, do nothing further here.
+        if (newState.authIsLoading) {
+            // If auth starts loading (e.g., user logs out and login process begins),
+            // reset the loaded context so data reloads when auth completes.
+            if (dataLoadedForContext.value !== null) { // Only reset if something was loaded before
+                console.log("useAccountingData: Auth is now loading. Resetting dataLoadedForContext.");
+                dataLoadedForContext.value = null;
             }
-        }
-    },
-    { deep: true, immediate: true }
-);
+            if (!accountingLoading.value) { // Set global loading if not already set
+                accountingLoading.value = true;
+            }
+            return;
+        }
 
+        // At this point, newState.authIsLoading is false (authentication is resolved)
+
+        if (newUserId) {
+            // User is logged in
+            if (dataLoadedForContext.value !== newUserId) {
+                console.log(`useAccountingData: Auth resolved for user ${newUserId}. Loading data.`);
+                loadAccountingData(newUserId);
+                dataLoadedForContext.value = newUserId;
+            } else {
+                console.log(`useAccountingData: Auth resolved for user ${newUserId}, but data already marked as loaded for this user.`);
+                // Ensure accountingLoading is false if we skip loading but it was somehow true
+                if (accountingLoading.value && isLoadingData === false) { // isLoadingData is the flag inside loadAccountingData
+                    accountingLoading.value = false;
+                }
+            }
+        } else {
+            // No user is logged in (auth resolved, user is null)
+            if (dataLoadedForContext.value !== 'local') {
+                console.log(`useAccountingData: Auth resolved, no user. Loading from localStorage.`);
+                loadAccountingData(null); // Load from localStorage
+                dataLoadedForContext.value = 'local';
+            } else {
+                console.log(`useAccountingData: Auth resolved, no user, but data already marked as loaded from localStorage.`);
+                if (accountingLoading.value && isLoadingData === false) {
+                    accountingLoading.value = false;
+                }
+            }
+        }
+    },
+    { deep: true, immediate: true }
+);
 
 
 // --- Exportar ---

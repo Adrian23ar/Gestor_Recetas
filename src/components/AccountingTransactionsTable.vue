@@ -140,7 +140,7 @@ onMounted(() => {
                 if (transactionData) emit('edit-transaction', transactionData);
             } else if (action === 'delete') {
                 // For delete, we typically just need the ID.
-                if (transactionData) emit('delete-transaction', transactionData.id);
+                if (transactionData) emit('delete-transaction', transactionData);
             }
         };
         tableElement.addEventListener('click', clickListener);

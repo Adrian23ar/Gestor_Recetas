@@ -178,8 +178,6 @@ export function useProductionRecords() {
         editingRecord.value = null;
     }
 
-    console.log(productionRecords.value);
-
     return {
         productionRecords, // Estos registros ahora deben incluir isSold
         recipes,

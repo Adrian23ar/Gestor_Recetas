@@ -147,7 +147,7 @@ onMounted(() => {
             if (action === 'edit') {
                 if (recordData) emit('edit-record', recordData);
             } else if (action === 'delete') {
-                emit('delete-record', id); // Para eliminar, solo se usa el ID como antes
+                emit('delete-record', recordData); // Para eliminar, solo se usa el ID como antes
             }
         };
         tableElement.addEventListener('click', clickListener);
