@@ -1,4 +1,5 @@
 <script setup>
+//src/components/AccountingTransactionsTable.vue
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import DataTable from 'datatables.net-vue3';
 import DataTablesCore from 'datatables.net-dt';
@@ -24,9 +25,10 @@ function formatDate(dateString) {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return 'Fecha Inválida';
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
-    const year = date.getFullYear();
+    // Use UTC methods to prevent timezone conversion issues
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+    const year = date.getUTCFullYear();
     return `${day}/${month}/${year}`;
 }
 

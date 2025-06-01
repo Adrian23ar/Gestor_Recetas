@@ -121,12 +121,21 @@ function getChangeDetails(originalObject, updatedObject, ignoreFields = ['id', '
 function _updateCurrentDailyRate() {
     if (exchangeRates.value && exchangeRates.value.length > 0) {
         exchangeRates.value.sort((a, b) => new Date(b.date) - new Date(a.date));
-        const today = new Date().toISOString().split('T')[0];
-        const rateForToday = exchangeRates.value.find(r => r.date === today);
+
+        // --- MODIFICACIÓN para hoy local ---
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const localTodayString = `${year}-${month}-${day}`;
+        // --- FIN MODIFICACIÓN ---
+
+        const rateForToday = exchangeRates.value.find(r => r.date === localTodayString); // Usar localTodayString
 
         if (rateForToday) {
             currentDailyRate.value = rateForToday.rate;
         } else if (exchangeRates.value.length > 0) {
+            // Fallback a la última tasa conocida si no hay para "hoy" local
             currentDailyRate.value = exchangeRates.value[0].rate;
         } else {
             currentDailyRate.value = null;
@@ -134,7 +143,7 @@ function _updateCurrentDailyRate() {
     } else {
         currentDailyRate.value = null;
     }
-    console.log("useAccountingData: currentDailyRate actualizado:", currentDailyRate.value);
+
 }
 
 /** Carga los datos contables (transacciones y tasas) */
@@ -206,85 +215,97 @@ function getRateForDate(targetDateString) {
 async function updateDailyRate(rateValue, dateString = null) {
     const rate = Number(rateValue);
     if (isNaN(rate) || rate <= 0) {
-        accountingError.value = "La tasa de cambio debe ser un número positivo.";
-        console.error("updateDailyRate: Tasa inválida:", rateValue);
+        accountingError.value = "La tasa de cambio debe ser un número positivo."; // [cite: 49]
+        console.error("updateDailyRate: Tasa inválida:", rateValue); // [cite: 50]
         return false;
     }
 
-    const targetDateString = dateString || new Date().toISOString().split('T')[0];
-    const rateEntry = {
-        id: targetDateString, // Usar fecha como ID para fácil reemplazo
-        date: targetDateString,
-        rate: rate,
-        timestamp: user.value ? serverTimestamp() : new Date().toISOString(),
-        userId: user.value ? user.value.uid : null,
-    };
-    const originalRateEntry = exchangeRates.value.find(r => r.id === targetDateString);
-    const originalRateValue = originalRateEntry ? originalRateEntry.rate : null;
-
-    // No registrar si la tasa y fecha son idénticas a una existente (evitar logs innecesarios)
-    if (originalRateEntry && originalRateEntry.rate === rate) {
-        console.log(`useAccountingData: La tasa ${rate} para ${targetDateString} ya está registrada y es la misma. No se requiere actualización.`);
-        _updateCurrentDailyRate(); // Asegurar que currentDailyRate esté actualizado
-        return true; // Indicar éxito sin cambios reales
+    let resolvedTargetDateString;
+    if (dateString) {
+        resolvedTargetDateString = dateString;
+    } else {
+        console.log(`useAccountingData: usando fecha de hoy.`); // Esta línea es de tu código, la mantengo
+        // Usar la fecha local para "hoy"
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        resolvedTargetDateString = `${year}-${month}-${day}`;
     }
 
-    const existingIndex = exchangeRates.value.findIndex(r => r.id === targetDateString);
+    const rateEntry = {
+        id: resolvedTargetDateString, // [cite: 51] // CORREGIDO
+        date: resolvedTargetDateString, // [cite: 51] // CORREGIDO
+        rate: rate, // [cite: 51]
+        timestamp: user.value ? serverTimestamp() : new Date().toISOString(), // [cite: 51, 52]
+        userId: user.value ? user.value.uid : null, // [cite: 52, 53]
+    };
+    // Aquí es donde necesitas usar resolvedTargetDateString
+    const originalRateEntry = exchangeRates.value.find(r => r.id === resolvedTargetDateString); // CORREGIDO
+    const originalRateValue = originalRateEntry ? originalRateEntry.rate : null;
+
+    if (originalRateEntry && originalRateEntry.rate === rate) {
+        // Y aquí también
+        console.log(`useAccountingData: La tasa ${rate} para ${resolvedTargetDateString} ya está registrada y es la misma. No se requiere actualización.`); // CORREGIDO
+        _updateCurrentDailyRate();
+        return true;
+    }
+
+    // Y aquí
+    const existingIndex = exchangeRates.value.findIndex(r => r.id === resolvedTargetDateString); // CORREGIDO
     if (existingIndex !== -1) {
         exchangeRates.value.splice(existingIndex, 1, rateEntry);
     } else {
-        exchangeRates.value.unshift(rateEntry); // Añadir al principio para mantener orden general si es nueva
+        exchangeRates.value.unshift(rateEntry);
     }
-    // Siempre re-ordenar para asegurar que la más reciente esté al principio
     exchangeRates.value.sort((a, b) => new Date(b.date) - new Date(a.date));
     _updateCurrentDailyRate();
 
     if (user.value) {
         const batch = writeBatch(db);
         try {
-            const rateDocRef = doc(db, `users/${user.value.uid}/exchangeRates`, targetDateString);
-            // Usar set con ID específico (crea o sobrescribe)
+            // Y aquí
+            const rateDocRef = doc(db, `users/${user.value.uid}/exchangeRates`, resolvedTargetDateString); // CORREGIDO
             batch.set(rateDocRef, rateEntry);
 
             await addEventHistoryEntry({
                 eventType: originalRateEntry ? 'EXCHANGE_RATE_EDITED' : 'EXCHANGE_RATE_CREATED',
                 entityType: 'Tasa de Cambio',
-                entityId: targetDateString,
-                entityName: `Tasa del ${targetDateString}`,
+                entityId: resolvedTargetDateString, // CORREGIDO
+                entityName: `Tasa del ${resolvedTargetDateString}`, // CORREGIDO
                 changes: [{
                     field: 'rate',
-                    oldValue: originalRateValue, // Puede ser null si era la primera del día
+                    oldValue: originalRateValue,
                     newValue: rate,
                     label: 'Tasa (Bs/USD)'
                 }]
             }, batch);
 
             await batch.commit();
-            console.log("useAccountingData: Tasa de cambio actualizada en Firestore para", targetDateString);
-            accountingError.value = null; // Limpiar error en éxito
+            // Y aquí
+            console.log("useAccountingData: Tasa de cambio actualizada en Firestore para", resolvedTargetDateString); // CORREGIDO
+            accountingError.value = null;
             return true;
         } catch (e) {
             console.error("Error actualizando tasa en Firestore:", e);
             accountingError.value = "Error al guardar la tasa de cambio en servidor.";
-            // Rollback local
-            if (originalRateEntry) { // Si existía, volver a ella
+            if (originalRateEntry) {
                 if (existingIndex !== -1) exchangeRates.value.splice(existingIndex, 1, originalRateEntry);
-                else exchangeRates.value.unshift(originalRateEntry); // Debería estar en existingIndex
-            } else { // Si no existía y la añadimos, quitarla
+                else exchangeRates.value.unshift(originalRateEntry);
+            } else {
                 if (existingIndex !== -1) exchangeRates.value.splice(existingIndex, 1);
-                else exchangeRates.value.shift(); // Si se añadió al principio
+                else exchangeRates.value.shift();
             }
-            exchangeRates.value.sort((a, b) => new Date(b.date) - new Date(a.date)); // Reordenar
+            exchangeRates.value.sort((a, b) => new Date(b.date) - new Date(a.date));
             _updateCurrentDailyRate();
             return false;
         }
     } else {
-        // localStorage ya se actualizó por el watch en useLocalStorage
         await addEventHistoryEntry({
             eventType: originalRateEntry ? 'EXCHANGE_RATE_EDITED' : 'EXCHANGE_RATE_CREATED',
             entityType: 'Tasa de Cambio',
-            entityId: targetDateString,
-            entityName: `Tasa del ${targetDateString}`,
+            entityId: resolvedTargetDateString, // CORREGIDO
+            entityName: `Tasa del ${resolvedTargetDateString}`, // CORREGIDO
             changes: [{
                 field: 'rate',
                 oldValue: originalRateValue,
@@ -292,22 +313,36 @@ async function updateDailyRate(rateValue, dateString = null) {
                 label: 'Tasa (Bs/USD)'
             }]
         });
-        accountingError.value = null; // Limpiar error en éxito
+        accountingError.value = null;
         return true;
     }
 }
 
 // --- FUNCIÓN MODIFICADA PARA OBTENER TASA DEL BCV DESDE API ---
-async function fetchAndUpdateBCVRate(maxRetries = 5) { // maxRetries: ej. buscar hasta 5 días atrás
+async function fetchAndUpdateBCVRate(maxRetries = 5) { // [cite: 77]
     console.log(`useAccountingData: Buscando tasa BCV para HOY, con hasta ${maxRetries} reintentos hacia atrás.`);
     rateFetchingLoading.value = true;
     accountingError.value = null; // Limpiar error general
 
     const originalTodayDate = new Date(); // Guardar la fecha original de "hoy"
-    const originalTodayYYYYMMDD = originalTodayDate.toISOString().split('T')[0];
+
+    // --- INICIO DE CAMBIO ---
+    // Determinar originalTodayYYYYMMDD basado en componentes de fecha local
+    const yearLocal = originalTodayDate.getFullYear();
+    const monthLocal = String(originalTodayDate.getMonth() + 1).padStart(2, '0');
+    const dayLocal = String(originalTodayDate.getDate()).padStart(2, '0');
+    const originalTodayYYYYMMDD = `${yearLocal}-${monthLocal}-${dayLocal}`;
+    // --- FIN DE CAMBIO ---
 
     let currentDateToTry = new Date(originalTodayDate); // Empezar con hoy
-    const apiToken = 'ZCp_K35_WZUYeTJWoJLYcA';
+    // Asegurémonos que currentDateToTry también se alinee con la medianoche local para la primera iteración si es necesario.
+    // Para la lógica de la API que usa DD-MM-YYYY, la forma en que construyes formattedApiDateForQuery ya usa los componentes de currentDateToTry.
+    // Sin embargo, para la primera iteración (i=0), currentDateToTry se basa en la hora actual.
+    // Si es importante que la primera consulta a la API sea exactamente para la fecha YYYY-MM-DD local (medianoche):
+    currentDateToTry = new Date(originalTodayYYYYMMDD + 'T00:00:00'); // Para que el primer día a intentar sea la fecha local "hoy" desde medianoche.
+
+
+    const apiToken = 'ZCp_K35_WZUYeTJWoJLYcA'; // Tu token
 
     for (let i = 0; i <= maxRetries; i++) {
         if (i > 0) { // Si no es el primer intento, retroceder un día
@@ -318,8 +353,8 @@ async function fetchAndUpdateBCVRate(maxRetries = 5) { // maxRetries: ej. buscar
         const month = String(currentDateToTry.getMonth() + 1).padStart(2, '0');
         const day = String(currentDateToTry.getDate()).padStart(2, '0');
 
-        const formattedApiDateForQuery = `${day}-${month}-${year}`; // DD-MM-YYYY para la API
-        const dateAttemptingYYYYMMDD = `${year}-${month}-${day}`; // YYYY-MM-DD para logs y potencial uso
+        const dateAttemptingYYYYMMDD = `${year}-${month}-${day}`;
+        const formattedApiDateForQuery = `${day}-${month}-${year}`;
 
         const apiUrl = `https://pydolarve.org/api/v2/dollar/history?page=bcv&monitor=usd&start_date=${formattedApiDateForQuery}&end_date=${formattedApiDateForQuery}&format_date=default&rounded_price=true&order=desc`;
 
@@ -333,22 +368,28 @@ async function fetchAndUpdateBCVRate(maxRetries = 5) { // maxRetries: ej. buscar
             if (!response.ok) {
                 let errorData;
                 try { errorData = JSON.parse(responseBodyForDebug); } catch (e) { /* no es json */ }
-                console.warn(`useAccountingData (fetchAndUpdateBCVRate): Error API intento ${i + 1} para ${dateAttemptingYYYYMMDD}: ${response.status}`, errorData || responseBodyForDebug);
-                if (i === maxRetries) { // Si es el último reintento
-                    throw new Error(`Error API final (${response.status}) para ${dateAttemptingYYYYMMDD}: ${errorData?.message || responseBodyForDebug}`);
+                // console.warn(`useAccountingData (fetchAndUpdateBCVRate): Error API intento ${i + 1} para ${dateAttemptingYYYYMMDD}: ${response.status}`, errorData || responseBodyForDebug);
+                if (i === maxRetries) {
+                    // --- CAMBIO PARA MENSAJE GENÉRICO ---
+                    accountingError.value = "Error al obtener datos de la API de tasas. Intente más tarde o ingrese la tasa manualmente.";
+                    // La línea original lanzaba un error que luego se capturaba y se usaba su message.
+                    // throw new Error(`Error API final (${response.status}) para ${dateAttemptingYYYYMMDD}: ${errorData?.message || responseBodyForDebug}`);
+                    rateFetchingLoading.value = false;// Asegurar que el loading se detenga
+                    return; // Salir si es el último reintento y falló
                 }
-                accountingError.value = `API no disponible para ${dateAttemptingYYYYMMDD}.`; // Error temporal
+                // Mensaje temporal para el usuario mientras se reintenta (opcional, o hacerlo más genérico)
+                // accountingError.value = `API no disponible para ${dateAttemptingYYYYMMDD}. Reintentando...`;
+                // Por ahora, para simplificar, no pondremos un error temporal aquí si va a reintentar.
+                // El error final se manejará arriba.
                 continue;
             }
 
             const data = JSON.parse(responseBodyForDebug);
-            // console.log(`useAccountingData (fetchAndUpdateBCVRate): Respuesta API para ${dateAttemptingYYYYMMDD}:`, data);
 
             if (data && data.history && data.history.length > 0) {
                 const latestRateEntry = data.history[0];
                 const bcvUsdRate = parseFloat(latestRateEntry.price);
 
-                // La fecha de la tasa según la API (last_update)
                 const [datePartApi] = latestRateEntry.last_update.split(',');
                 const [dayApi, monthApi, yearApi] = datePartApi.split('/');
                 const apiDateRateIsValidForYYYYMMDD = `${yearApi}-${monthApi.padStart(2, '0')}-${dayApi.padStart(2, '0')}`;
@@ -357,14 +398,9 @@ async function fetchAndUpdateBCVRate(maxRetries = 5) { // maxRetries: ej. buscar
                 if (bcvUsdRate && !isNaN(bcvUsdRate) && bcvUsdRate > 0) {
                     console.log(`useAccountingData (fetchAndUpdateBCVRate): Tasa ENCONTRADA: ${bcvUsdRate} (corresponde al ${apiDateRateIsValidForYYYYMMDD}). Se aplicará para HOY (${originalTodayYYYYMMDD}).`);
 
-                    // IMPORTANTE: Guardar la tasa encontrada (que puede ser de un día anterior)
-                    // con la FECHA DE HOY (originalTodayYYYYMMDD).
                     await updateDailyRate(bcvUsdRate, originalTodayYYYYMMDD);
 
-                    // También es bueno guardar la tasa para su fecha real si aún no existe,
-                    // para enriquecer los datos históricos.
                     if (originalTodayYYYYMMDD !== apiDateRateIsValidForYYYYMMDD) {
-                        // Solo llama a updateDailyRate si no es la misma fecha para evitar doble log/escritura
                         await updateDailyRate(bcvUsdRate, apiDateRateIsValidForYYYYMMDD);
                     }
 
@@ -383,24 +419,20 @@ async function fetchAndUpdateBCVRate(maxRetries = 5) { // maxRetries: ej. buscar
             console.error(`useAccountingData (fetchAndUpdateBCVRate): Catch Error intento ${i + 1} para ${dateAttemptingYYYYMMDD}:`, error);
             accountingError.value = error.message || `Error procesando tasa para ${dateAttemptingYYYYMMDD}.`;
             if (i === maxRetries) { // Si es el último reintento y falló
+                accountingError.value = "Error procesando la respuesta de la API de la tasa BCV. Intente más tarde.";
                 rateFetchingLoading.value = false;
-                // No hacer nada más, el error ya está seteado. currentDailyRate mantendrá el último valor válido.
                 return;
             }
         }
     }
 
-    // Si el bucle termina sin encontrar una tasa
     rateFetchingLoading.value = false;
-    // accountingError ya tiene el mensaje del último intento fallido, o el mensaje de abajo si todos fueron "no historial".
-    if (!accountingError.value || accountingError.value.startsWith("No hay tasa API para")) {
-        accountingError.value = `No se encontró tasa en API para hoy (${originalTodayYYYYMMDD}) ni en los ${maxRetries} días anteriores.`;
+    if (!accountingError.value) { // Solo si no se estableció un error más específico (como el de response.ok o el catch)
+        // --- CAMBIO PARA MENSAJE GENÉRICO ---
+        accountingError.value = `Servicio de tasas no disponible. No se encontró tasa para hoy (${originalTodayYYYYMMDD}) ni días anteriores.`;
     }
     console.log(`useAccountingData (fetchAndUpdateBCVRate): ${accountingError.value}`);
-    // currentDailyRate se actualizará (o no) basado en lo que updateDailyRate haya hecho o no.
-    // Si no se encontró nada, currentDailyRate mantendrá su valor previo (que podría ser de una carga anterior).
 }
-// --- FIN FUNCIÓN MODIFICADA ---
 // --- FIN FUNCIÓN MODIFICADA ---
 
 // --- FUNCIÓN MODIFICADA PARA OBTENER TASA DE UNA FECHA ESPECÍFICA (CON REINTENTOS HACIA ATRÁS) ---
@@ -442,13 +474,16 @@ async function fetchRateForSpecificDateFromAPI(dateStringYYYYMMDD, maxRetries = 
             if (!response.ok) {
                 let errorData;
                 try { errorData = JSON.parse(responseBodyForDebug); } catch (e) { /* no es json */ }
-                console.warn(`useAccountingData: Error API en intento ${i + 1} para ${currentDateYYYYMMDD}: ${response.status}`, errorData || responseBodyForDebug);
+                // console.warn(`useAccountingData: Error API en intento ${i + 1} para ${currentDateYYYYMMDD}: ${response.status}`, errorData || responseBodyForDebug); // Warn Si falla la API
                 // Continuar al siguiente reintento si hay un error de API (ej. 404 si la ruta no existe para esa fecha)
                 // pero si es el último reintento y falla, se propagará el error después del bucle.
                 if (i === maxRetries) {
-                    throw new Error(`Error API final (${response.status}) para ${currentDateYYYYMMDD}: ${errorData?.message || responseBodyForDebug}`);
+                    // --- CAMBIO PARA MENSAJE GENÉRICO ---
+                    specificDateRateError.value = "Error al obtener datos de la API de tasas para esta fecha.";
+
+                    specificDateRateFetchingLoading.value = false;
+                    return { rate: null, dateFound: null, error: specificDateRateError.value };
                 }
-                specificDateRateError.value = `API no disponible para ${currentDateYYYYMMDD}.`; // Error temporal
                 continue; // Probar día anterior
             }
 
@@ -462,9 +497,6 @@ async function fetchRateForSpecificDateFromAPI(dateStringYYYYMMDD, maxRetries = 
                 if (specificDateRate && !isNaN(specificDateRate) && specificDateRate > 0) {
                     console.log(`useAccountingData: Tasa USD BCV ENCONTRADA: ${specificDateRate} para fecha (API) ${rateEntry.last_update}, buscada originalmente para ${dateStringYYYYMMDD} (encontrada en ${currentDateYYYYMMDD})`);
 
-                    // La tasa se encontró para `currentDateYYYYMMDD`.
-                    // La política es aplicar esta tasa a `dateStringYYYYMMDD` (la fecha original seleccionada en el modal).
-                    // Y también guardar/actualizar esta tasa en `exchangeRates` para `currentDateYYYYMMDD`.
                     await updateDailyRate(specificDateRate, currentDateYYYYMMDD);
 
                     specificDateRateFetchingLoading.value = false;
@@ -480,8 +512,9 @@ async function fetchRateForSpecificDateFromAPI(dateStringYYYYMMDD, maxRetries = 
 
         } catch (error) {
             console.error(`useAccountingData: Catch Error en intento ${i + 1} para ${currentDateYYYYMMDD}:`, error);
-            specificDateRateError.value = error.message || `Error procesando tasa para ${currentDateYYYYMMDD}.`;
-            if (i === maxRetries) { // Si es el último reintento y falló
+            if (i === maxRetries) {
+                // --- CAMBIO PARA MENSAJE GENÉRICO ---
+                specificDateRateError.value = "Error procesando la respuesta de la API para esta fecha.";
                 specificDateRateFetchingLoading.value = false;
                 return { rate: null, dateFound: null, error: specificDateRateError.value };
             }
@@ -491,7 +524,10 @@ async function fetchRateForSpecificDateFromAPI(dateStringYYYYMMDD, maxRetries = 
 
     // Si el bucle termina sin encontrar una tasa
     specificDateRateFetchingLoading.value = false;
-    specificDateRateError.value = `No se encontró tasa en API para ${dateStringYYYYMMDD} ni en los ${maxRetries} días anteriores.`;
+    if (!specificDateRateError.value) { // Solo si no se estableció un error más específico
+        // --- CAMBIO PARA MENSAJE GENÉRICO ---
+        specificDateRateError.value = `Servicio de tasas no disponible para ${dateStringYYYYMMDD} ni días anteriores.`;
+    }
     console.log(specificDateRateError.value);
     return { rate: null, dateFound: null, error: specificDateRateError.value };
 }
@@ -789,59 +825,59 @@ function calculateSummary(filteredList) {
 const dataLoadedForContext = ref(null); // Will store user UID or 'local'
 
 watch(
-    () => ({ user: user.value, authIsLoading: authLoading.value }),
-    (newState, oldState) => {
-        const newUserId = newState.user ? newState.user.uid : null;
-        const oldUserId = oldState?.user ? oldState.user.uid : null;
+    () => ({ user: user.value, authIsLoading: authLoading.value }),
+    (newState, oldState) => {
+        const newUserId = newState.user ? newState.user.uid : null;
+        const oldUserId = oldState?.user ? oldState.user.uid : null;
 
-        console.log(
-          `useAccountingData: Watcher triggered. AuthLoading: ${newState.authIsLoading}, User: ${newUserId}, Previously Loaded for: ${dataLoadedForContext.value}`
-        );
+        console.log(
+            `useAccountingData: Watcher triggered. AuthLoading: ${newState.authIsLoading}, User: ${newUserId}, Previously Loaded for: ${dataLoadedForContext.value}`
+        );
 
-        // If authentication is still in progress, do nothing further here.
-        if (newState.authIsLoading) {
-            // If auth starts loading (e.g., user logs out and login process begins),
-            // reset the loaded context so data reloads when auth completes.
-            if (dataLoadedForContext.value !== null) { // Only reset if something was loaded before
+        // If authentication is still in progress, do nothing further here.
+        if (newState.authIsLoading) {
+            // If auth starts loading (e.g., user logs out and login process begins),
+            // reset the loaded context so data reloads when auth completes.
+            if (dataLoadedForContext.value !== null) { // Only reset if something was loaded before
                 console.log("useAccountingData: Auth is now loading. Resetting dataLoadedForContext.");
-                dataLoadedForContext.value = null;
+                dataLoadedForContext.value = null;
             }
             if (!accountingLoading.value) { // Set global loading if not already set
                 accountingLoading.value = true;
             }
-            return;
-        }
+            return;
+        }
 
-        // At this point, newState.authIsLoading is false (authentication is resolved)
+        // At this point, newState.authIsLoading is false (authentication is resolved)
 
-        if (newUserId) {
-            // User is logged in
-            if (dataLoadedForContext.value !== newUserId) {
-                console.log(`useAccountingData: Auth resolved for user ${newUserId}. Loading data.`);
-                loadAccountingData(newUserId);
-                dataLoadedForContext.value = newUserId;
-            } else {
-                console.log(`useAccountingData: Auth resolved for user ${newUserId}, but data already marked as loaded for this user.`);
+        if (newUserId) {
+            // User is logged in
+            if (dataLoadedForContext.value !== newUserId) {
+                console.log(`useAccountingData: Auth resolved for user ${newUserId}. Loading data.`);
+                loadAccountingData(newUserId);
+                dataLoadedForContext.value = newUserId;
+            } else {
+                console.log(`useAccountingData: Auth resolved for user ${newUserId}, but data already marked as loaded for this user.`);
                 // Ensure accountingLoading is false if we skip loading but it was somehow true
                 if (accountingLoading.value && isLoadingData === false) { // isLoadingData is the flag inside loadAccountingData
                     accountingLoading.value = false;
                 }
-            }
-        } else {
-            // No user is logged in (auth resolved, user is null)
-            if (dataLoadedForContext.value !== 'local') {
-                console.log(`useAccountingData: Auth resolved, no user. Loading from localStorage.`);
-                loadAccountingData(null); // Load from localStorage
-                dataLoadedForContext.value = 'local';
-            } else {
-                console.log(`useAccountingData: Auth resolved, no user, but data already marked as loaded from localStorage.`);
+            }
+        } else {
+            // No user is logged in (auth resolved, user is null)
+            if (dataLoadedForContext.value !== 'local') {
+                console.log(`useAccountingData: Auth resolved, no user. Loading from localStorage.`);
+                loadAccountingData(null); // Load from localStorage
+                dataLoadedForContext.value = 'local';
+            } else {
+                console.log(`useAccountingData: Auth resolved, no user, but data already marked as loaded from localStorage.`);
                 if (accountingLoading.value && isLoadingData === false) {
                     accountingLoading.value = false;
                 }
-            }
-        }
-    },
-    { deep: true, immediate: true }
+            }
+        }
+    },
+    { deep: true, immediate: true }
 );
 
 

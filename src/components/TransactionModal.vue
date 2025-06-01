@@ -1,3 +1,236 @@
+<script setup>
+import { ref, watch, computed, nextTick } from 'vue';
+import { useAccountingData } from '../composables/useAccountingData';
+import { useToast } from 'vue-toastification';
+
+const props = defineProps({
+    show: { type: Boolean, required: true },
+    transactionData: { type: Object, default: null },
+});
+
+const emit = defineEmits(['close', 'save']);
+const toast = useToast();
+
+const {
+    getRateForDate,
+    fetchRateForSpecificDateFromAPI,
+    // specificDateRateFetchingLoading, // Ya no se usa directamente, se maneja con isRateLoadingInModal
+    specificDateRateError,
+    updateDailyRate
+} = useAccountingData();
+
+// En <script setup> de src/components/TransactionModal.vue
+
+const defaultFormData = () => {
+    // --- MODIFICACIÓN para hoy local ---
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0'); // Meses son 0-indexados
+    const day = String(now.getDate()).padStart(2, '0');
+    const localTodayString = `${year}-${month}-${day}`;
+    // --- FIN MODIFICACIÓN ---
+
+    return {
+        id: null,
+        type: 'income',
+        date: localTodayString, // // CORREGIDO: Usar la fecha local "de hoy"
+        description: '',
+        category: '',
+        amountBs: null,
+        exchangeRate: null, // Se determinará por attemptFetchRateForSelectedDate
+        amountUsd: 0,
+        notes: '',
+    };
+};
+
+const formData = ref(defaultFormData());
+const applicableRate = ref(null);
+const rateErrorMessageForModal = ref('');
+const isRateLoadingInModal = ref(false);
+const actualDateOfRate = ref(null);
+const dateChangeDebounceTimer = ref(null); // <-- Timer para el debounce
+
+const isEditing = computed(() => !!props.transactionData?.id);
+
+watch(() => props.show, async (newShow) => {
+    if (newShow) {
+        clearTimeout(dateChangeDebounceTimer.value); // Limpiar debounce si estaba activo al abrir
+        rateErrorMessageForModal.value = '';
+        actualDateOfRate.value = null;
+        if (specificDateRateError) specificDateRateError.value = null;
+        isRateLoadingInModal.value = false;
+
+        if (props.transactionData) {
+            formData.value = JSON.parse(JSON.stringify(props.transactionData));
+            formData.value.amountBs = Number(formData.value.amountBs);
+            if (formData.value.date) {
+                await attemptFetchRateForSelectedDate(formData.value.date, true, false); // false para no debounced
+            }
+        } else {
+            formData.value = defaultFormData();
+            if (formData.value.date) {
+                await attemptFetchRateForSelectedDate(formData.value.date, false, false); // false para no debounced
+            }
+        }
+        nextTick(() => document.getElementById('tx-description')?.focus());
+    } else {
+        formData.value = defaultFormData();
+        applicableRate.value = null;
+        rateErrorMessageForModal.value = '';
+        isRateLoadingInModal.value = false;
+        actualDateOfRate.value = null;
+        clearTimeout(dateChangeDebounceTimer.value); // Limpiar debounce al cerrar
+    }
+});
+
+// Observador para la fecha con DEBOUNCE
+watch(() => formData.value.date, (newDate, oldDate) => {
+    clearTimeout(dateChangeDebounceTimer.value); // Limpiar el timer anterior
+
+    if (newDate && newDate !== oldDate) {
+        actualDateOfRate.value = null;
+        isRateLoadingInModal.value = true; // Mostrar "Cargando..." inmediatamente
+        rateErrorMessageForModal.value = ''; // Limpiar mensaje de error previo
+
+        dateChangeDebounceTimer.value = setTimeout(async () => {
+            await attemptFetchRateForSelectedDate(newDate, false, true); // true para indicar que es debounced
+        }, 500); // 500ms de delay
+    } else if (!newDate) {
+        applicableRate.value = null;
+        formData.value.exchangeRate = null;
+        formData.value.amountUsd = 0;
+        actualDateOfRate.value = null;
+        rateErrorMessageForModal.value = 'Selecciona una fecha válida.';
+        isRateLoadingInModal.value = false;
+    } else if (newDate === oldDate) {
+        // Si la fecha no cambió, no hacer nada, pero asegurarse que el loading no se quede en true
+        // Esto puede pasar si el watch se dispara por otra reactividad interna.
+        // No es estrictamente necesario si el if de arriba (newDate !== oldDate) es suficiente.
+    }
+});
+
+async function attemptFetchRateForSelectedDate(selectedDateString, isInitialEditLoad = false, isDebouncedCall = false) {
+    if (!selectedDateString) {
+        isRateLoadingInModal.value = false; // Asegurar que el loading se quite
+        return;
+    }
+
+    // Si no es una llamada debounced (ej. carga inicial o reintento manual),
+    // y ya se está cargando por un debounce, no hacer nada para evitar llamadas múltiples.
+    if (!isDebouncedCall && isRateLoadingInModal.value && dateChangeDebounceTimer.value) {
+        console.log("TransactionModal: Debounce en progreso, omitiendo llamada directa concurrente.");
+        return;
+    }
+
+    // Si no es una llamada debounced, asegurarse que el loading se active si no lo está.
+    if (!isDebouncedCall) {
+        isRateLoadingInModal.value = true;
+    }
+    // Si es una llamada debounced, isRateLoadingInModal ya se puso en true antes del setTimeout.
+
+    rateErrorMessageForModal.value = '';
+    actualDateOfRate.value = null;
+    if (specificDateRateError) specificDateRateError.value = null;
+
+    const apiResult = await fetchRateForSpecificDateFromAPI(selectedDateString);
+
+    if (apiResult && apiResult.rate !== null) {
+        applicableRate.value = apiResult.rate;
+        formData.value.exchangeRate = apiResult.rate;
+        actualDateOfRate.value = apiResult.dateFound;
+
+        if (apiResult.dateFound !== selectedDateString) {
+            const friendlySelectedDate = formatDate(selectedDateString);
+            const friendlyFoundDate = formatDate(apiResult.dateFound);
+            rateErrorMessageForModal.value = `Tasa para ${friendlySelectedDate} no disponible (API). Se usó tasa de ${friendlyFoundDate}: ${apiResult.rate.toFixed(2)} Bs.`;
+            if (!isInitialEditLoad) toast.info(rateErrorMessageForModal.value, { timeout: 2000 });
+        } else {
+            if (!isInitialEditLoad) toast.success(`Tasa (${apiResult.rate.toFixed(2)} Bs) aplicada para ${formatDate(selectedDateString)}.`, { timeout: 3000 });
+        }
+    } else { // Si la API no devolvió una tasa utilizable
+        console.warn(`TransactionModal: API (con reintentos) no devolvió tasa para ${selectedDateString}. (Error: ${apiResult?.error || specificDateRateError?.value}). Intentando con tasa local.`);
+        const rateFromLocal = getRateForDate(selectedDateString);
+        if (rateFromLocal !== null && rateFromLocal > 0) {
+            // ... se usa tasa local ...
+            rateErrorMessageForModal.value = `Tasa de API no disponible. Se usó tasa local guardada para ${formatDate(selectedDateString)}.`;
+        } else {
+            if (isInitialEditLoad && props.transactionData?.exchangeRate > 0) {
+                // ... se usa tasa original de la transacción ...
+                rateErrorMessageForModal.value = `API y local no disponibles. Se mantuvo tasa original de la transacción.`;
+            } else {
+                // ... Fallback final si no hay ninguna tasa ...
+                // Esta línea es la importante para el mensaje de error final
+                rateErrorMessageForModal.value = apiResult?.error || `No se encontró tasa (API o local) para ${formatDate(selectedDateString)}.`;
+                // Ya que specificDateRateError.value (del composable) es lo mismo que apiResult?.error cuando este último existe,
+                // podemos simplificarlo ligeramente o mantenerlo por si apiResult es nulo.
+                // La versión anterior era: apiResult?.error || specificDateRateError?.value || `No se encontró tasa...`
+            }
+        }
+    }
+    recalculateUsd();
+    isRateLoadingInModal.value = false;
+}
+
+function formatDate(dateString) { // Función helper para mostrar fechas amigables en mensajes
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString + 'T00:00:00');
+    return date.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function recalculateUsd() {
+    if (formData.value.amountBs && applicableRate.value && applicableRate.value > 0) {
+        formData.value.amountUsd = formData.value.amountBs / applicableRate.value;
+    } else {
+        formData.value.amountUsd = 0;
+    }
+}
+
+watch(() => formData.value.amountBs, () => {
+    if (applicableRate.value) {
+        recalculateUsd();
+    }
+});
+
+const closeModal = () => {
+    clearTimeout(dateChangeDebounceTimer.value); // Limpiar debounce al cerrar
+    emit('close');
+};
+
+const save = () => {
+    if (!formData.value.description.trim()) {
+        toast.warning("La descripción no puede estar vacía."); return;
+    }
+    if (!formData.value.amountBs || formData.value.amountBs <= 0) {
+        toast.warning("El monto en Bs. debe ser mayor a cero."); return;
+    }
+    // Permitir guardar si hay un mensaje informativo sobre tasa de día anterior, pero no si es un error real de "no tasa"
+    const isErrorPreventingSave = rateErrorMessageForModal.value && (!actualDateOfRate.value || !applicableRate.value);
+    if (isErrorPreventingSave || (!applicableRate.value && !isRateLoadingInModal.value)) {
+        toast.error(rateErrorMessageForModal.value || "Falta la tasa de cambio o es inválida para la fecha seleccionada.");
+        return;
+    }
+    if (!applicableRate.value || applicableRate.value <= 0) {
+        toast.error("La tasa aplicada es inválida o no se ha podido determinar.");
+        return;
+    }
+
+    const dataToSave = {
+        ...formData.value,
+        exchangeRate: applicableRate.value,
+        amountUsd: parseFloat(amountUsdDisplay.value)
+    };
+    emit('save', dataToSave);
+};
+
+const amountUsdDisplay = computed(() => {
+    if (formData.value.amountBs && applicableRate.value && applicableRate.value > 0) {
+        return (formData.value.amountBs / applicableRate.value).toFixed(2);
+    }
+    return '0.00';
+});
+
+</script>
+
 <template>
     <Transition name="modal-transition">
         <div v-if="show"
@@ -109,227 +342,6 @@
         </div>
     </Transition>
 </template>
-
-<script setup>
-import { ref, watch, computed, nextTick } from 'vue';
-import { useAccountingData } from '../composables/useAccountingData';
-import { useToast } from 'vue-toastification';
-
-const props = defineProps({
-    show: { type: Boolean, required: true },
-    transactionData: { type: Object, default: null },
-});
-
-const emit = defineEmits(['close', 'save']);
-const toast = useToast();
-
-const {
-    getRateForDate,
-    fetchRateForSpecificDateFromAPI,
-    // specificDateRateFetchingLoading, // Ya no se usa directamente, se maneja con isRateLoadingInModal
-    specificDateRateError,
-    updateDailyRate
-} = useAccountingData();
-
-const defaultFormData = () => ({
-    id: null, type: 'income', date: new Date().toISOString().split('T')[0],
-    description: '', category: '', amountBs: null,
-    exchangeRate: null, amountUsd: 0, notes: '',
-});
-
-const formData = ref(defaultFormData());
-const applicableRate = ref(null);
-const rateErrorMessageForModal = ref('');
-const isRateLoadingInModal = ref(false);
-const actualDateOfRate = ref(null);
-const dateChangeDebounceTimer = ref(null); // <-- Timer para el debounce
-
-const isEditing = computed(() => !!props.transactionData?.id);
-
-watch(() => props.show, async (newShow) => {
-    if (newShow) {
-        clearTimeout(dateChangeDebounceTimer.value); // Limpiar debounce si estaba activo al abrir
-        rateErrorMessageForModal.value = '';
-        actualDateOfRate.value = null;
-        if (specificDateRateError) specificDateRateError.value = null;
-        isRateLoadingInModal.value = false;
-
-        if (props.transactionData) {
-            formData.value = JSON.parse(JSON.stringify(props.transactionData));
-            formData.value.amountBs = Number(formData.value.amountBs);
-            if (formData.value.date) {
-                await attemptFetchRateForSelectedDate(formData.value.date, true, false); // false para no debounced
-            }
-        } else {
-            formData.value = defaultFormData();
-            if (formData.value.date) {
-                await attemptFetchRateForSelectedDate(formData.value.date, false, false); // false para no debounced
-            }
-        }
-        nextTick(() => document.getElementById('tx-description')?.focus());
-    } else {
-        formData.value = defaultFormData();
-        applicableRate.value = null;
-        rateErrorMessageForModal.value = '';
-        isRateLoadingInModal.value = false;
-        actualDateOfRate.value = null;
-        clearTimeout(dateChangeDebounceTimer.value); // Limpiar debounce al cerrar
-    }
-});
-
-// Observador para la fecha con DEBOUNCE
-watch(() => formData.value.date, (newDate, oldDate) => {
-    clearTimeout(dateChangeDebounceTimer.value); // Limpiar el timer anterior
-
-    if (newDate && newDate !== oldDate) {
-        actualDateOfRate.value = null;
-        isRateLoadingInModal.value = true; // Mostrar "Cargando..." inmediatamente
-        rateErrorMessageForModal.value = ''; // Limpiar mensaje de error previo
-
-        dateChangeDebounceTimer.value = setTimeout(async () => {
-            await attemptFetchRateForSelectedDate(newDate, false, true); // true para indicar que es debounced
-        }, 500); // 500ms de delay
-    } else if (!newDate) {
-        applicableRate.value = null;
-        formData.value.exchangeRate = null;
-        formData.value.amountUsd = 0;
-        actualDateOfRate.value = null;
-        rateErrorMessageForModal.value = 'Selecciona una fecha válida.';
-        isRateLoadingInModal.value = false;
-    } else if (newDate === oldDate) {
-        // Si la fecha no cambió, no hacer nada, pero asegurarse que el loading no se quede en true
-        // Esto puede pasar si el watch se dispara por otra reactividad interna.
-        // No es estrictamente necesario si el if de arriba (newDate !== oldDate) es suficiente.
-    }
-});
-
-async function attemptFetchRateForSelectedDate(selectedDateString, isInitialEditLoad = false, isDebouncedCall = false) {
-    if (!selectedDateString) {
-        isRateLoadingInModal.value = false; // Asegurar que el loading se quite
-        return;
-    }
-
-    // Si no es una llamada debounced (ej. carga inicial o reintento manual),
-    // y ya se está cargando por un debounce, no hacer nada para evitar llamadas múltiples.
-    if (!isDebouncedCall && isRateLoadingInModal.value && dateChangeDebounceTimer.value) {
-        console.log("TransactionModal: Debounce en progreso, omitiendo llamada directa concurrente.");
-        return;
-    }
-
-    // Si no es una llamada debounced, asegurarse que el loading se active si no lo está.
-    if (!isDebouncedCall) {
-        isRateLoadingInModal.value = true;
-    }
-    // Si es una llamada debounced, isRateLoadingInModal ya se puso en true antes del setTimeout.
-
-    rateErrorMessageForModal.value = '';
-    actualDateOfRate.value = null;
-    if (specificDateRateError) specificDateRateError.value = null;
-
-    const apiResult = await fetchRateForSpecificDateFromAPI(selectedDateString);
-
-    if (apiResult && apiResult.rate !== null) {
-        applicableRate.value = apiResult.rate;
-        formData.value.exchangeRate = apiResult.rate;
-        actualDateOfRate.value = apiResult.dateFound;
-
-        if (apiResult.dateFound !== selectedDateString) {
-            const friendlySelectedDate = formatDate(selectedDateString);
-            const friendlyFoundDate = formatDate(apiResult.dateFound);
-            rateErrorMessageForModal.value = `Tasa para ${friendlySelectedDate} no disponible (API). Se usó tasa de ${friendlyFoundDate}: ${apiResult.rate.toFixed(2)} Bs.`;
-            if (!isInitialEditLoad) toast.info(rateErrorMessageForModal.value, { timeout: 2000 });
-        } else {
-            if (!isInitialEditLoad) toast.success(`Tasa (${apiResult.rate.toFixed(2)} Bs) aplicada para ${formatDate(selectedDateString)}.`, { timeout: 3000 });
-        }
-    } else {
-        console.warn(`TransactionModal: API (con reintentos) no devolvió tasa para ${selectedDateString}. (Error: ${apiResult?.error || specificDateRateError?.value}). Intentando con tasa local.`);
-        const rateFromLocal = getRateForDate(selectedDateString);
-        if (rateFromLocal !== null && rateFromLocal > 0) {
-            applicableRate.value = rateFromLocal;
-            formData.value.exchangeRate = rateFromLocal;
-            actualDateOfRate.value = selectedDateString;
-            rateErrorMessageForModal.value = `Tasa de API no disponible. Se usó tasa local guardada para ${formatDate(selectedDateString)}.`;
-            if (!isInitialEditLoad) toast.info(rateErrorMessageForModal.value, { timeout: 3000 });
-        } else {
-            if (isInitialEditLoad && props.transactionData?.exchangeRate > 0) {
-                applicableRate.value = Number(props.transactionData.exchangeRate);
-                formData.value.exchangeRate = Number(props.transactionData.exchangeRate);
-                actualDateOfRate.value = props.transactionData.date;
-                rateErrorMessageForModal.value = `API y local no disponibles. Se mantuvo tasa original de la transacción.`;
-                if (!isInitialEditLoad) toast.warn(rateErrorMessageForModal.value, { timeout: 3000 });
-            } else {
-                applicableRate.value = null;
-                formData.value.exchangeRate = null;
-                rateErrorMessageForModal.value = apiResult?.error || specificDateRateError?.value || `No se encontró tasa (API o local) para ${formatDate(selectedDateString)}.`;
-            }
-        }
-    }
-    recalculateUsd();
-    isRateLoadingInModal.value = false;
-}
-
-function formatDate(dateString) { // Función helper para mostrar fechas amigables en mensajes
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString + 'T00:00:00');
-    return date.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-function recalculateUsd() {
-    if (formData.value.amountBs && applicableRate.value && applicableRate.value > 0) {
-        formData.value.amountUsd = formData.value.amountBs / applicableRate.value;
-    } else {
-        formData.value.amountUsd = 0;
-    }
-}
-
-watch(() => formData.value.amountBs, () => {
-    if (applicableRate.value) {
-        recalculateUsd();
-    }
-});
-
-const closeModal = () => {
-    clearTimeout(dateChangeDebounceTimer.value); // Limpiar debounce al cerrar
-    emit('close');
-};
-
-const save = () => {
-    if (!formData.value.description.trim()) {
-        toast.warning("La descripción no puede estar vacía."); return;
-    }
-    if (!formData.value.amountBs || formData.value.amountBs <= 0) {
-        toast.warning("El monto en Bs. debe ser mayor a cero."); return;
-    }
-    // Permitir guardar si hay un mensaje informativo sobre tasa de día anterior, pero no si es un error real de "no tasa"
-    const isErrorPreventingSave = rateErrorMessageForModal.value && (!actualDateOfRate.value || !applicableRate.value);
-    if (isErrorPreventingSave || (!applicableRate.value && !isRateLoadingInModal.value)) {
-        toast.error(rateErrorMessageForModal.value || "Falta la tasa de cambio o es inválida para la fecha seleccionada.");
-        return;
-    }
-    if (!applicableRate.value || applicableRate.value <= 0) {
-        toast.error("La tasa aplicada es inválida o no se ha podido determinar.");
-        return;
-    }
-
-    const dataToSave = {
-        ...formData.value,
-        exchangeRate: applicableRate.value,
-        amountUsd: parseFloat(amountUsdDisplay.value)
-    };
-    emit('save', dataToSave);
-};
-
-const amountUsdDisplay = computed(() => {
-    if (formData.value.amountBs && applicableRate.value && applicableRate.value > 0) {
-        return (formData.value.amountBs / applicableRate.value).toFixed(2);
-    }
-    return '0.00';
-});
-
-// Ya no necesitamos el watcher para specificDateRateFetchingLoading,
-// isRateLoadingInModal lo maneja localmente de forma más directa.
-
-</script>
 
 <style scoped>
 .fixed.inset-0 {

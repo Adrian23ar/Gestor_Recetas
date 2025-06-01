@@ -1,130 +1,5 @@
-<template>
-    <div class="space-y-6">
-        <h1 class="text-2xl font-semibold text-primary-800 dark:text-dark-primary-200">
-            Registro Contable (Ingresos y Egresos)
-        </h1>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div class="md:col-span-2 bg-contrast p-4 rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg space-y-2">
-                <h2 class="text-lg font-semibold text-primary-700 dark:text-dark-primary-300 mb-2">Resumen del Periodo
-                </h2>
-                <div class="flex justify-between text-sm">
-                    <span class="text-text-muted dark:text-dark-text-muted">Total Ingresos (Bs.):</span>
-                    <span class="font-medium text-success-700 dark:text-success-400">{{
-                        formatCurrency(summary.totalIncome, 'Bs.') }}</span>
-                </div>
-                <div class="flex justify-between text-sm">
-                    <span class="text-text-muted dark:text-dark-text-muted">Total Egresos (Bs.):</span>
-                    <span class="font-medium text-danger-600 dark:text-danger-400">{{
-                        formatCurrency(summary.totalExpenses, 'Bs.') }}</span>
-                </div>
-                <hr class="border-neutral-200 dark:border-dark-neutral-700 my-1">
-                <div class="flex justify-between text-sm font-bold">
-                    <span class="text-text-base dark:text-dark-text-base">Saldo Neto (Bs.):</span>
-                    <span
-                        :class="summary.netBalance >= 0 ? 'text-success-700 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'">
-                        {{ formatCurrency(summary.netBalance, 'Bs.') }}
-                    </span>
-                </div>
-            </div>
-
-            <div class="bg-contrast p-4 rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg space-y-2">
-                <h2 class="text-lg font-semibold text-primary-700 dark:text-dark-primary-300 mb-2">Tasa del Día (Bs/USD)
-                </h2>
-                <div v-if="rateFetchingLoading" class="text-center py-2">
-                    <p class="text-sm text-text-muted dark:text-dark-text-muted italic">Obteniendo tasa BCV...</p>
-                </div>
-                <p v-else class="text-center text-3xl font-bold text-secondary-700 dark:text-dark-secondary-300 mb-2">
-                    {{ currentDailyRate ? formatCurrency(currentDailyRate, '') : (accountingError &&
-                        !rateFetchingLoading ? 'Error API' : 'No definida') }}
-                </p>
-                <div class="flex gap-2 items-start">
-                    <div class="flex-grow">
-                        <input type="number" v-model.number="newRateInput" placeholder="Tasa manual" min="0" step="any"
-                            :disabled="rateFetchingLoading"
-                            class="flex-grow mt-1 block w-full px-3 py-1.5 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 sm:text-sm dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400" />
-                        <button @click="handleUpdateRate"
-                            :disabled="!newRateInput || newRateInput <= 0 || rateFetchingLoading"
-                            class="w-full mt-1 px-3 py-1.5 bg-accent-500 text-white text-sm font-medium rounded-md shadow-sm hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-accent-500 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-dark-accent-400 dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400">
-                            Actualizar Manual
-                        </button>
-                    </div>
-                    <button @click="triggerAutoRateFetch" :disabled="rateFetchingLoading"
-                        title="Obtener tasa del BCV desde la API"
-                        class="p-2 mt-1 bg-blue-500 text-white rounded-md shadow-sm hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-blue-600 dark:hover:bg-blue-700">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd"
-                                d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-                                clip-rule="evenodd" />
-                        </svg>
-                    </button>
-                </div>
-                <p v-if="rateUpdateError" class="text-xs text-danger-600 dark:text-danger-400 mt-1">{{ rateUpdateError
-                }}</p>
-                <p v-if="accountingError && !rateUpdateError" class="text-xs text-danger-600 dark:text-danger-400 mt-1">
-                    Error API: {{ accountingError }}
-                </p>
-                <p v-if="lastRateDate && !rateFetchingLoading"
-                    class="text-xs text-text-muted dark:text-dark-text-muted mt-1">
-                    Última tasa guardada: {{ formatDate(lastRateDate) }}
-                    ({{ currentDailyRate ? formatCurrency(currentDailyRate, '') : 'N/A' }})
-                </p>
-            </div>
-        </div>
-
-        <div
-            class="flex flex-wrap justify-between items-center gap-4 bg-contrast p-4 rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg">
-            <div class="flex flex-wrap items-center gap-3">
-                <label for="startDate"
-                    class="text-sm font-medium text-text-base dark:text-dark-text-base">Desde:</label>
-                <input type="date" id="startDate" v-model="filterStartDate" class="input-filter-style">
-
-                <label for="endDate"
-                    class="text-sm font-medium text-text-base dark:text-dark-text-base ml-2">Hasta:</label>
-                <input type="date" id="endDate" v-model="filterEndDate" class="input-filter-style">
-
-                <label for="typeFilter"
-                    class="text-sm font-medium text-text-base dark:text-dark-text-base ml-2">Tipo:</label>
-                <select id="typeFilter" v-model="filterType" class="input-filter-style !pr-8">
-                    <option value="all">Todos</option>
-                    <option value="income">Ingreso</option>
-                    <option value="expense">Egreso</option>
-                </select>
-            </div>
-
-            <button @click="openAddModal"
-                class="px-4 py-2 cursor-pointer bg-accent-500 text-white font-semibold rounded-lg shadow hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 transition-all duration-150 dark:bg-dark-accent-400 dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400">
-                + Registrar Movimiento
-            </button>
-        </div>
-
-        <div v-if="accountingLoading && !transactions.length"
-            class="text-center py-10 text-text-muted italic dark:text-dark-text-muted">
-            Cargando transacciones...
-        </div>
-        <div v-else-if="generalError" class="text-center py-10 text-danger-600 font-medium dark:text-danger-400">
-            Error al cargar datos: {{ generalError }}
-        </div>
-        <div v-else-if="transactions.length === 0 && !accountingLoading"
-            class="text-center py-10 text-text-muted italic dark:text-dark-text-muted">
-            No hay transacciones registradas para el periodo seleccionado.
-        </div>
-        <div v-else class="bg-contrast rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg overflow-x-auto">
-            <!-- Replace old table with the new component -->
-            <AccountingTransactionsTable :records="filteredTransactions" @edit-transaction="openEditModal"
-                @delete-transaction="openConfirmDelete" />
-        </div>
-
-        <TransactionModal :show="isTransactionModalOpen" :transaction-data="editingTransaction"
-            @close="closeTransactionModal" @save="handleSaveTransaction" />
-        <ConfirmationModal :show="isConfirmDeleteOpen" title="Confirmar Eliminación"
-            :message="`¿Estás seguro de eliminar la transacción '${transactionNameToDelete}'?`"
-            confirmButtonText="Sí, Eliminar" @close="closeConfirmDelete" @confirm="confirmDeleteTransaction" />
-
-    </div>
-</template>
-
 <script setup>
+//src/views/AccountingView.vue
 import { ref, computed, onMounted, watch } from 'vue'; // Añadido onMounted y watch
 import { useAccountingData } from '../composables/useAccountingData';
 import TransactionModal from '../components/TransactionModal.vue';
@@ -174,6 +49,31 @@ const filterEndDate = ref(defaultEndDate());
 const filterType = ref('all');
 
 // --- Computed Properties ---
+const criticalErrorPreventingDisplay = computed(() => {
+    // Prioridad 1: Error al cargar transacciones (no depende de tasas)
+    if (accountingError.value && accountingError.value === "Error al cargar datos contables.") { // [cite: 43]
+        return accountingError.value;
+    }
+    // Prioridad 2: Falla de API de tasas Y no hay tasa actual Y no se está cargando
+    if (
+        accountingError.value &&
+        (accountingError.value.includes("API") || accountingError.value.includes("tasa") || accountingError.value.includes("Error al guardar la tasa")) && // Errores relacionados con tasas
+        currentDailyRate.value === null && // [cite: 8, 28, 29]
+        !rateFetchingLoading.value // [cite: 6]
+    ) {
+        return `Error al obtener la tasa de cambio: ${accountingError.value}`;
+    }
+    return null;
+});
+
+const showRatePromptMessage = computed(() => {
+    // Mostrar prompt si hubo un error relacionado con tasas, no hay tasa, y no se está cargando
+    return !!criticalErrorPreventingDisplay.value && // Solo si hay un error crítico que ya impide mostrar la tabla
+        criticalErrorPreventingDisplay.value.toLowerCase().includes("tasa") && // Asegurar que el error es sobre tasas
+        currentDailyRate.value === null && // [cite: 8, 28, 29]
+        !rateFetchingLoading.value; // [cite: 6]
+});
+
 const filteredTransactions = computed(() => {
     return getFilteredTransactions({
         startDate: filterStartDate.value,
@@ -216,7 +116,6 @@ const generalError = computed(() => {
     return null;
 });
 
-
 // --- Methods ---
 const formatCurrency = (value, symbol = 'Bs. ', useGrouping = true) => {
     if (value === null || value === undefined || isNaN(Number(value))) {
@@ -243,7 +142,6 @@ const formatCurrency = (value, symbol = 'Bs. ', useGrouping = true) => {
     }
     return formatted; // Para el caso de Bs. que ya incluye el símbolo por toLocaleString
 };
-
 
 const formatDate = (dateString) => {
     if (!dateString) return '';
@@ -282,8 +180,8 @@ const closeTransactionModal = () => {
 const handleSaveTransaction = async (data) => {
     let success = false;
     let message = '';
-    // Limpiar errores de API antes de intentar guardar
-    accountingError.value = null;
+    const previousAccountingError = accountingError.value; // Guardar error previo si lo hay
+    accountingError.value = null; // Limpiar para esta operación específica
 
     if (data.id) {
         success = await saveTransaction(data);
@@ -299,6 +197,11 @@ const handleSaveTransaction = async (data) => {
         closeTransactionModal();
     } else {
         toast.error(message);
+        // Si la operación falló, y había un error global previo (ej. de API de tasa), restaurarlo
+        // si el error actual de la transacción no es más importante o si son diferentes.
+        if (previousAccountingError && !accountingError.value) {
+            accountingError.value = previousAccountingError;
+        }
     }
 };
 
@@ -367,19 +270,163 @@ onMounted(async () => {
     await triggerAutoRateFetch();
 });
 
-// Observar cambios en filterStartDate o filterEndDate para recalcular si es necesario
-// (actualmente, summary y filteredTransactions son computed, por lo que se actualizan automáticamente)
-// No se necesita un watcher explícito aquí para eso.
-
-// Observar accountingError para mostrar toasts si no son manejados localmente
 watch(accountingError, (newError) => {
-    // Solo mostrar toast si el error no es por rateUpdateError (ya manejado)
-    // y si no estamos en medio de una carga de tasa API (rateFetchingLoading)
-    // para evitar toasts duplicados o prematuros.
-    if (newError && !rateUpdateError.value && !rateFetchingLoading.value) {
-        // Podrías añadir una lógica más fina para no mostrar ciertos errores si ya se mostraron
-        // toast.error(`Error general: ${newError}`);
+    if (
+        newError &&
+        !rateFetchingLoading.value && // No mostrar si se está cargando la tasa [cite: 6]
+        !rateUpdateError.value && // // CORREGIDO: Verificar si la cadena de error está vacía
+        !showRatePromptMessage.value // No mostrar si ya hay un prompt específico para la tasa
+    ) {
+        // Evitar mostrar un toast genérico si ya estamos pidiendo la tasa manual por un error de API
+        // O si el error ya fue manejado por un toast más específico en las funciones de acción.
+        // Esta sección es para errores más 'residuales' o 'generales'.
+        // Por ejemplo, si "Error al cargar datos contables." no tuviera su propio manejo de UI:
+        if (newError === "Error al cargar datos contables.") { // [cite: 43]
+            // toast.error(`Error del sistema: ${newError}`); // Ejemplo, si decides activarlo
+        }
+        // Puedes añadir más condiciones aquí para otros errores generales no cubiertos.
     }
 });
 
 </script>
+
+<template>
+    <div class="space-y-6">
+        <h1 class="text-2xl font-semibold text-primary-800 dark:text-dark-primary-200">
+            Registro Contable (Ingresos y Egresos)
+        </h1>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="md:col-span-2 bg-contrast p-4 rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg space-y-2">
+                <h2 class="text-lg font-semibold text-primary-700 dark:text-dark-primary-300 mb-2">Resumen del Periodo
+                </h2>
+                <div class="flex justify-between text-sm">
+                    <span class="text-text-muted dark:text-dark-text-muted">Total Ingresos (Bs.):</span>
+                    <span class="font-medium text-success-700 dark:text-success-400">{{
+                        formatCurrency(summary.totalIncome, 'Bs.') }}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-text-muted dark:text-dark-text-muted">Total Egresos (Bs.):</span>
+                    <span class="font-medium text-danger-600 dark:text-danger-400">{{
+                        formatCurrency(summary.totalExpenses, 'Bs.') }}</span>
+                </div>
+                <hr class="border-neutral-200 dark:border-dark-neutral-700 my-1">
+                <div class="flex justify-between text-sm font-bold">
+                    <span class="text-text-base dark:text-dark-text-base">Saldo Neto (Bs.):</span>
+                    <span
+                        :class="summary.netBalance >= 0 ? 'text-success-700 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'">
+                        {{ formatCurrency(summary.netBalance, 'Bs.') }}
+                    </span>
+                </div>
+            </div>
+
+            <div class="bg-contrast p-4 rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg space-y-2">
+                <h2 class="text-lg font-semibold text-primary-700 dark:text-dark-primary-300 mb-2">Tasa del Día (Bs/USD)
+                </h2>
+                <div v-if="rateFetchingLoading" class="text-center py-2">
+                    <p class="text-sm text-text-muted dark:text-dark-text-muted italic">Obteniendo tasa BCV...</p>
+                </div>
+                <p v-else-if="currentDailyRate"
+                    class="text-center text-3xl font-bold text-secondary-700 dark:text-dark-secondary-300 mb-2">
+                    {{ formatCurrency(currentDailyRate, '') }}
+                </p>
+                <p v-else-if="!accountingError && !currentDailyRate"
+                    class="text-center text-3xl font-bold text-warning-600 dark:text-warning-400 mb-2">
+                    No definida
+                </p>
+                <p v-else-if="accountingError && !showRatePromptMessage"
+                    class="text-center text-3xl font-bold text-danger-600 dark:text-danger-400 mb-2">
+                    Error API
+                </p>
+                <div class="flex gap-2 items-start">
+                    <div class="flex-grow">
+                        <input type="number" v-model.number="newRateInput" placeholder="Tasa manual" min="0" step="any"
+                            :disabled="rateFetchingLoading"
+                            class="flex-grow mt-1 block w-full px-3 py-1.5 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 sm:text-sm dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400" />
+                        <button @click="handleUpdateRate"
+                            :disabled="!newRateInput || newRateInput <= 0 || rateFetchingLoading"
+                            class="w-full mt-1 px-3 py-1.5 bg-accent-500 text-white text-sm font-medium rounded-md shadow-sm hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-accent-500 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-dark-accent-400 dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400">
+                            Actualizar Manual
+                        </button>
+                    </div>
+                    <button @click="triggerAutoRateFetch" :disabled="rateFetchingLoading"
+                        title="Obtener tasa del BCV desde la API"
+                        class="p-2 mt-1 bg-blue-500 text-white rounded-md shadow-sm hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-blue-600 dark:hover:bg-blue-700">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd"
+                                d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+                <p v-if="rateUpdateError" class="text-xs text-danger-600 dark:text-danger-400 mt-1">{{ rateUpdateError
+                }}</p>
+                <p v-if="accountingError && !rateUpdateError && !showRatePromptMessage"
+                    class="text-xs text-danger-600 dark:text-danger-400 mt-1">
+                    Error API: {{ accountingError }}
+                </p>
+                <p v-if="lastRateDate && !rateFetchingLoading"
+                    class="text-xs text-text-muted dark:text-dark-text-muted mt-1">
+                    Última tasa guardada: {{ formatDate(lastRateDate) }}
+                    ({{ currentDailyRate ? formatCurrency(currentDailyRate, '') : 'N/A' }})
+                </p>
+            </div>
+        </div>
+
+        <div
+            class="flex flex-wrap justify-between items-center gap-4 bg-contrast p-4 rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg">
+            <div class="flex flex-wrap items-center gap-3">
+                <label for="startDate"
+                    class="text-sm font-medium text-text-base dark:text-dark-text-base">Desde:</label>
+                <input type="date" id="startDate" v-model="filterStartDate" class="input-filter-style">
+
+                <label for="endDate"
+                    class="text-sm font-medium text-text-base dark:text-dark-text-base ml-2">Hasta:</label>
+                <input type="date" id="endDate" v-model="filterEndDate" class="input-filter-style">
+
+                <label for="typeFilter"
+                    class="text-sm font-medium text-text-base dark:text-dark-text-base ml-2">Tipo:</label>
+                <select id="typeFilter" v-model="filterType" class="input-filter-style !pr-8">
+                    <option value="all">Todos</option>
+                    <option value="income">Ingreso</option>
+                    <option value="expense">Egreso</option>
+                </select>
+            </div>
+
+            <button @click="openAddModal"
+                class="px-4 py-2 cursor-pointer bg-accent-500 text-white font-semibold rounded-lg shadow hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 transition-all duration-150 dark:bg-dark-accent-400 dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400">
+                + Registrar Movimiento
+            </button>
+        </div>
+
+
+        <div v-if="accountingLoading && !transactions.length"
+            class="text-center py-10 text-text-muted italic dark:text-dark-text-muted">
+            Cargando transacciones...
+        </div>
+        <div v-else-if="criticalErrorPreventingDisplay"
+            class="text-center py-10 text-danger-600 font-medium dark:text-danger-400">
+            <p>{{ criticalErrorPreventingDisplay }}</p>
+            <div v-if="showRatePromptMessage" class="mt-4 text-sm text-text-muted dark:text-dark-text-muted">
+                <p>Por favor, ingrese la tasa del día manualmente en la sección "Tasa del Día (Bs/USD)" más arriba para
+                    continuar.</p>
+                <p class="mt-2">Una vez ingresada la tasa, los datos y la tabla de transacciones se mostrarán si no hay
+                    otros errores.</p>
+            </div>
+        </div>
+        <div v-else-if="transactions.length === 0 && !accountingLoading"
+            class="text-center py-10 text-text-muted italic dark:text-dark-text-muted">
+            No hay transacciones registradas para el periodo seleccionado.
+        </div>
+        <div v-else class="bg-contrast rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg overflow-x-auto">
+            <AccountingTransactionsTable :records="filteredTransactions" @edit-transaction="openEditModal"
+                @delete-transaction="openConfirmDelete" />
+        </div>
+
+        <TransactionModal :show="isTransactionModalOpen" :transaction-data="editingTransaction"
+            @close="closeTransactionModal" @save="handleSaveTransaction" />
+        <ConfirmationModal :show="isConfirmDeleteOpen" title="Confirmar Eliminación"
+            :message="`¿Estás seguro de eliminar la transacción '${transactionNameToDelete}'?`"
+            confirmButtonText="Sí, Eliminar" @close="closeConfirmDelete" @confirm="confirmDeleteTransaction" />
+    </div>
+</template>
