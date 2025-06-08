@@ -212,6 +212,30 @@ function getRateForDate(targetDateString) {
     return foundRate ? foundRate.rate : null;
 }
 
+// --- FUNCIÓN NUEVA Y MÁS ESTRICTA ---
+function getRateForExactDate(targetDateString) {
+    if (!exchangeRates.value || exchangeRates.value.length === 0) {
+        return null;
+    }
+    // Busca una coincidencia exacta de fecha, sin usar "<="
+    const foundRate = exchangeRates.value.find(rate => rate.date === targetDateString);
+    return foundRate ? foundRate.rate : null;
+}
+
+// --- FUNCIÓN NUEVA: OBTIENE EL OBJETO COMPLETO DE LA TASA MÁS RECIENTE ---
+function getLatestRateDataBefore(targetDateString) {
+    if (!exchangeRates.value || exchangeRates.value.length === 0) {
+        return null;
+    }
+    // Aseguramos que las tasas estén ordenadas de más nueva a más vieja
+    const sortedRates = [...exchangeRates.value].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Buscamos la primera tasa que sea en o antes de la fecha objetivo
+    const foundRateData = sortedRates.find(rate => rate.date <= targetDateString);
+
+    return foundRateData || null; // Devuelve el objeto completo o null
+}
+
 async function updateDailyRate(rateValue, dateString = null) {
     const rate = Number(rateValue);
     if (isNaN(rate) || rate <= 0) {
@@ -894,6 +918,8 @@ export function useAccountingData() {
         specificDateRateError, // NUEVO: error específico para la tasa de fecha en modal
         loadAccountingData,
         getRateForDate, // Esta la usaremos como fallback o para fechas muy antiguas
+        getRateForExactDate,
+        getLatestRateDataBefore,
         updateDailyRate,
         addTransaction,
         saveTransaction,

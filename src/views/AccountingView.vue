@@ -36,14 +36,27 @@ const transactionNameToDelete = ref('');
 const newRateInput = ref(null);
 const rateUpdateError = ref(''); // Error específico para la actualización manual de tasa
 
-// --- State for Filtering ---
 const defaultStartDate = () => {
     const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-}
+    now.setDate(now.getDate() - 30); // Restar 30 días a la fecha actual
+
+    // Formatear a YYYY-MM-DD
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0'); // Los meses son 0-indexados
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 const defaultEndDate = () => {
-    return new Date().toISOString().split('T')[0];
-}
+    const now = new Date(); // Fecha local actual
+
+    // Formatear a YYYY-MM-DD
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0'); // Los meses son 0-indexados
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 const filterStartDate = ref(defaultStartDate());
 const filterEndDate = ref(defaultEndDate());
 const filterType = ref('all');
@@ -360,7 +373,7 @@ watch(accountingError, (newError) => {
                     </button>
                 </div>
                 <p v-if="rateUpdateError" class="text-xs text-danger-600 dark:text-danger-400 mt-1">{{ rateUpdateError
-                }}</p>
+                    }}</p>
                 <p v-if="accountingError && !rateUpdateError && !showRatePromptMessage"
                     class="text-xs text-danger-600 dark:text-danger-400 mt-1">
                     Error API: {{ accountingError }}

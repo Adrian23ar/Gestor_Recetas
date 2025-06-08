@@ -1,4 +1,5 @@
 <script setup>
+// src/components/TableRegister.vue
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import DataTable from 'datatables.net-vue3';
 import DataTablesCore from 'datatables.net-dt';

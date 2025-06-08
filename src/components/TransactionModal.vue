@@ -1,4 +1,5 @@
 <script setup>
+// src/components/TransactionModal.vue
 import { ref, watch, computed, nextTick } from 'vue';
 import { useAccountingData } from '../composables/useAccountingData';
 import { useToast } from 'vue-toastification';
@@ -7,37 +8,39 @@ const props = defineProps({
     show: { type: Boolean, required: true },
     transactionData: { type: Object, default: null },
 });
-
 const emit = defineEmits(['close', 'save']);
 const toast = useToast();
 
 const {
-    getRateForDate,
+    getRateForExactDate,
+    getLatestRateDataBefore,
     fetchRateForSpecificDateFromAPI,
-    // specificDateRateFetchingLoading, // Ya no se usa directamente, se maneja con isRateLoadingInModal
     specificDateRateError,
     updateDailyRate
 } = useAccountingData();
 
-// En <script setup> de src/components/TransactionModal.vue
+// --- Estado para manejar la elección de tasa obsoleta ---
+const showStaleRateChoice = ref(false);
+const staleRateInfo = ref(null);
+
+const showManualRateInput = ref(false);
+const manualRateInput = ref(null);
 
 const defaultFormData = () => {
-    // --- MODIFICACIÓN para hoy local ---
     const now = new Date();
     const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0'); // Meses son 0-indexados
+    const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
     const localTodayString = `${year}-${month}-${day}`;
-    // --- FIN MODIFICACIÓN ---
 
     return {
         id: null,
         type: 'income',
-        date: localTodayString, // // CORREGIDO: Usar la fecha local "de hoy"
+        date: localTodayString,
         description: '',
         category: '',
         amountBs: null,
-        exchangeRate: null, // Se determinará por attemptFetchRateForSelectedDate
+        exchangeRate: null,
         amountUsd: 0,
         notes: '',
     };
@@ -48,53 +51,67 @@ const applicableRate = ref(null);
 const rateErrorMessageForModal = ref('');
 const isRateLoadingInModal = ref(false);
 const actualDateOfRate = ref(null);
-const dateChangeDebounceTimer = ref(null); // <-- Timer para el debounce
+const dateChangeDebounceTimer = ref(null);
 
 const isEditing = computed(() => !!props.transactionData?.id);
 
+// MODIFICADO: La función daysBetween ya no es necesaria y se puede eliminar.
+
 watch(() => props.show, async (newShow) => {
     if (newShow) {
-        clearTimeout(dateChangeDebounceTimer.value); // Limpiar debounce si estaba activo al abrir
+        // Limpiar todo al abrir
+        clearTimeout(dateChangeDebounceTimer.value);
         rateErrorMessageForModal.value = '';
         actualDateOfRate.value = null;
         if (specificDateRateError) specificDateRateError.value = null;
         isRateLoadingInModal.value = false;
+        showManualRateInput.value = false;
+        manualRateInput.value = null;
+        showStaleRateChoice.value = false;
+        staleRateInfo.value = null;
 
         if (props.transactionData) {
             formData.value = JSON.parse(JSON.stringify(props.transactionData));
             formData.value.amountBs = Number(formData.value.amountBs);
             if (formData.value.date) {
-                await attemptFetchRateForSelectedDate(formData.value.date, true, false); // false para no debounced
+                await attemptFetchRateForSelectedDate(formData.value.date, true);
             }
         } else {
             formData.value = defaultFormData();
             if (formData.value.date) {
-                await attemptFetchRateForSelectedDate(formData.value.date, false, false); // false para no debounced
+                await attemptFetchRateForSelectedDate(formData.value.date, false);
             }
         }
         nextTick(() => document.getElementById('tx-description')?.focus());
     } else {
+        // Limpieza completa al cerrar
         formData.value = defaultFormData();
         applicableRate.value = null;
         rateErrorMessageForModal.value = '';
         isRateLoadingInModal.value = false;
         actualDateOfRate.value = null;
-        clearTimeout(dateChangeDebounceTimer.value); // Limpiar debounce al cerrar
+        showManualRateInput.value = false;
+        showStaleRateChoice.value = false;
+        staleRateInfo.value = null;
+        clearTimeout(dateChangeDebounceTimer.value);
     }
 });
 
-// Observador para la fecha con DEBOUNCE
 watch(() => formData.value.date, (newDate, oldDate) => {
-    clearTimeout(dateChangeDebounceTimer.value); // Limpiar el timer anterior
+    clearTimeout(dateChangeDebounceTimer.value);
 
     if (newDate && newDate !== oldDate) {
+        showManualRateInput.value = false;
+        manualRateInput.value = null;
+        showStaleRateChoice.value = false;
+        staleRateInfo.value = null;
         actualDateOfRate.value = null;
-        isRateLoadingInModal.value = true; // Mostrar "Cargando..." inmediatamente
-        rateErrorMessageForModal.value = ''; // Limpiar mensaje de error previo
-
+        applicableRate.value = null;
+        isRateLoadingInModal.value = true;
+        rateErrorMessageForModal.value = '';
         dateChangeDebounceTimer.value = setTimeout(async () => {
-            await attemptFetchRateForSelectedDate(newDate, false, true); // true para indicar que es debounced
-        }, 500); // 500ms de delay
+            await attemptFetchRateForSelectedDate(newDate, false);
+        }, 500);
     } else if (!newDate) {
         applicableRate.value = null;
         formData.value.exchangeRate = null;
@@ -102,76 +119,90 @@ watch(() => formData.value.date, (newDate, oldDate) => {
         actualDateOfRate.value = null;
         rateErrorMessageForModal.value = 'Selecciona una fecha válida.';
         isRateLoadingInModal.value = false;
-    } else if (newDate === oldDate) {
-        // Si la fecha no cambió, no hacer nada, pero asegurarse que el loading no se quede en true
-        // Esto puede pasar si el watch se dispara por otra reactividad interna.
-        // No es estrictamente necesario si el if de arriba (newDate !== oldDate) es suficiente.
     }
 });
 
-async function attemptFetchRateForSelectedDate(selectedDateString, isInitialEditLoad = false, isDebouncedCall = false) {
-    if (!selectedDateString) {
-        isRateLoadingInModal.value = false; // Asegurar que el loading se quite
-        return;
-    }
-
-    // Si no es una llamada debounced (ej. carga inicial o reintento manual),
-    // y ya se está cargando por un debounce, no hacer nada para evitar llamadas múltiples.
-    if (!isDebouncedCall && isRateLoadingInModal.value && dateChangeDebounceTimer.value) {
-        console.log("TransactionModal: Debounce en progreso, omitiendo llamada directa concurrente.");
-        return;
-    }
-
-    // Si no es una llamada debounced, asegurarse que el loading se active si no lo está.
-    if (!isDebouncedCall) {
-        isRateLoadingInModal.value = true;
-    }
-    // Si es una llamada debounced, isRateLoadingInModal ya se puso en true antes del setTimeout.
-
+// MODIFICADO: La lógica ahora es más simple y siempre ofrece la elección.
+async function attemptFetchRateForSelectedDate(selectedDate) {
+    isRateLoadingInModal.value = true;
     rateErrorMessageForModal.value = '';
     actualDateOfRate.value = null;
+    applicableRate.value = null;
+    showManualRateInput.value = false;
+    showStaleRateChoice.value = false;
+    staleRateInfo.value = null;
     if (specificDateRateError) specificDateRateError.value = null;
 
-    const apiResult = await fetchRateForSpecificDateFromAPI(selectedDateString);
-
-    if (apiResult && apiResult.rate !== null) {
-        applicableRate.value = apiResult.rate;
-        formData.value.exchangeRate = apiResult.rate;
-        actualDateOfRate.value = apiResult.dateFound;
-
-        if (apiResult.dateFound !== selectedDateString) {
-            const friendlySelectedDate = formatDate(selectedDateString);
-            const friendlyFoundDate = formatDate(apiResult.dateFound);
-            rateErrorMessageForModal.value = `Tasa para ${friendlySelectedDate} no disponible (API). Se usó tasa de ${friendlyFoundDate}: ${apiResult.rate.toFixed(2)} Bs.`;
-            if (!isInitialEditLoad) toast.info(rateErrorMessageForModal.value, { timeout: 2000 });
-        } else {
-            if (!isInitialEditLoad) toast.success(`Tasa (${apiResult.rate.toFixed(2)} Bs) aplicada para ${formatDate(selectedDateString)}.`, { timeout: 3000 });
-        }
-    } else { // Si la API no devolvió una tasa utilizable
-        console.warn(`TransactionModal: API (con reintentos) no devolvió tasa para ${selectedDateString}. (Error: ${apiResult?.error || specificDateRateError?.value}). Intentando con tasa local.`);
-        const rateFromLocal = getRateForDate(selectedDateString);
-        if (rateFromLocal !== null && rateFromLocal > 0) {
-            // ... se usa tasa local ...
-            rateErrorMessageForModal.value = `Tasa de API no disponible. Se usó tasa local guardada para ${formatDate(selectedDateString)}.`;
-        } else {
-            if (isInitialEditLoad && props.transactionData?.exchangeRate > 0) {
-                // ... se usa tasa original de la transacción ...
-                rateErrorMessageForModal.value = `API y local no disponibles. Se mantuvo tasa original de la transacción.`;
-            } else {
-                // ... Fallback final si no hay ninguna tasa ...
-                // Esta línea es la importante para el mensaje de error final
-                rateErrorMessageForModal.value = apiResult?.error || `No se encontró tasa (API o local) para ${formatDate(selectedDateString)}.`;
-                // Ya que specificDateRateError.value (del composable) es lo mismo que apiResult?.error cuando este último existe,
-                // podemos simplificarlo ligeramente o mantenerlo por si apiResult es nulo.
-                // La versión anterior era: apiResult?.error || specificDateRateError?.value || `No se encontró tasa...`
-            }
-        }
+    // 1. Intento API
+    const apiResult = await fetchRateForSpecificDateFromAPI(selectedDate);
+    if (apiResult && apiResult.rate) {
+        applyRate(apiResult.rate, apiResult.dateFound, `Tasa de API para ${formatDate(apiResult.dateFound)} aplicada.`);
+        isRateLoadingInModal.value = false;
+        return;
     }
-    recalculateUsd();
+
+    // 2. Fallo API -> Intento Local Exacto
+    const exactRate = getRateForExactDate(selectedDate);
+    if (exactRate) {
+        applyRate(exactRate, selectedDate, "API no disponible. Se usó la tasa guardada para esta fecha.");
+        isRateLoadingInModal.value = false;
+        return;
+    }
+
+    // 3. Fallo Exacto -> Buscar cualquier tasa anterior
+    const latestRateData = getLatestRateDataBefore(selectedDate);
+    if (latestRateData) {
+        // Si se encuentra una tasa anterior (sin importar la antigüedad), se ofrece la elección.
+        staleRateInfo.value = latestRateData;
+        showStaleRateChoice.value = true;
+        rateErrorMessageForModal.value = `No hay tasa para esta fecha. La última guardada es del ${formatDate(latestRateData.date)}.`;
+    } else {
+        // 4. Fallo Total -> No hay ninguna tasa anterior, pedir manual.
+        rateErrorMessageForModal.value = "No se encontró ninguna tasa. Por favor, ingrésela manualmente.";
+        showManualRateInput.value = true;
+    }
+
     isRateLoadingInModal.value = false;
 }
 
-function formatDate(dateString) { // Función helper para mostrar fechas amigables en mensajes
+function handleUseStaleRate() {
+    if (staleRateInfo.value) {
+        const { rate, date } = staleRateInfo.value;
+        applyRate(rate, date, `Tasa obsoleta del ${formatDate(date)} aplicada.`);
+        showStaleRateChoice.value = false;
+        rateErrorMessageForModal.value = '';
+    }
+}
+
+function handleEnterManualInstead() {
+    showStaleRateChoice.value = false;
+    rateErrorMessageForModal.value = "Por favor, ingrese una tasa para el " + formatDate(formData.value.date);
+    showManualRateInput.value = true;
+}
+
+function applyRate(rate, dateFound, message = '') {
+    applicableRate.value = rate;
+    formData.value.exchangeRate = rate;
+    actualDateOfRate.value = dateFound;
+    recalculateUsd();
+    if (message) toast.success(message, { timeout: 4000 });
+}
+
+async function applyManualRate() {
+    const rate = Number(manualRateInput.value);
+    if (!rate || rate <= 0) {
+        toast.error("Por favor, ingrese un número positivo para la tasa.");
+        return;
+    }
+    applyRate(rate, formData.value.date, `Tasa manual (${rate}) aplicada.`);
+    showManualRateInput.value = false;
+    rateErrorMessageForModal.value = '';
+    manualRateInput.value = null;
+
+    await updateDailyRate(rate, formData.value.date);
+}
+
+function formatDate(dateString) {
     if (!dateString) return 'N/A';
     const date = new Date(dateString + 'T00:00:00');
     return date.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -192,28 +223,23 @@ watch(() => formData.value.amountBs, () => {
 });
 
 const closeModal = () => {
-    clearTimeout(dateChangeDebounceTimer.value); // Limpiar debounce al cerrar
+    clearTimeout(dateChangeDebounceTimer.value);
     emit('close');
 };
 
 const save = () => {
     if (!formData.value.description.trim()) {
-        toast.warning("La descripción no puede estar vacía."); return;
+        toast.warning("La descripción no puede estar vacía.");
+        return;
     }
     if (!formData.value.amountBs || formData.value.amountBs <= 0) {
-        toast.warning("El monto en Bs. debe ser mayor a cero."); return;
-    }
-    // Permitir guardar si hay un mensaje informativo sobre tasa de día anterior, pero no si es un error real de "no tasa"
-    const isErrorPreventingSave = rateErrorMessageForModal.value && (!actualDateOfRate.value || !applicableRate.value);
-    if (isErrorPreventingSave || (!applicableRate.value && !isRateLoadingInModal.value)) {
-        toast.error(rateErrorMessageForModal.value || "Falta la tasa de cambio o es inválida para la fecha seleccionada.");
+        toast.warning("El monto en Bs. debe ser mayor a cero.");
         return;
     }
     if (!applicableRate.value || applicableRate.value <= 0) {
-        toast.error("La tasa aplicada es inválida o no se ha podido determinar.");
+        toast.error(rateErrorMessageForModal.value || "Falta la tasa de cambio o es inválida para la fecha seleccionada.");
         return;
     }
-
     const dataToSave = {
         ...formData.value,
         exchangeRate: applicableRate.value,
@@ -228,7 +254,6 @@ const amountUsdDisplay = computed(() => {
     }
     return '0.00';
 });
-
 </script>
 
 <template>
@@ -267,10 +292,10 @@ const amountUsdDisplay = computed(() => {
                             class="block text-sm font-medium text-text-base dark:text-dark-text-base">Fecha:</label>
                         <input type="date" id="tx-date" v-model="formData.date" required class="mt-1 input-field-style">
                         <p v-if="isRateLoadingInModal" class="text-xs text-blue-600 dark:text-blue-400 mt-1 italic">
-                            Obteniendo tasa de API para esta fecha...
+                            Buscando tasa...
                         </p>
                         <p v-if="rateErrorMessageForModal && !isRateLoadingInModal" class="text-xs mt-1"
-                            :class="{ 'text-amber-600 dark:text-amber-400': actualDateOfRate && actualDateOfRate !== formData.date, 'text-danger-600 dark:text-danger-400': !actualDateOfRate || (actualDateOfRate === formData.date && !applicableRate) }">
+                            :class="{ 'text-amber-600 dark:text-amber-400': showStaleRateChoice, 'text-danger-600 dark:text-danger-400 transition-all': showManualRateInput && !showStaleRateChoice }">
                             {{ rateErrorMessageForModal }}
                         </p>
                     </div>
@@ -297,24 +322,46 @@ const amountUsdDisplay = computed(() => {
                             step="0.01" class="mt-1 input-field-style">
                     </div>
 
-                    <div class="p-2 bg-neutral-50 rounded dark:bg-dark-neutral-800/50 text-sm">
+                    <div class="p-3 bg-neutral-50 rounded dark:bg-dark-neutral-800/50 text-sm space-y-2">
                         <p>Tasa Aplicada (Bs/USD):
                             <strong class="dark:text-dark-secondary-300">
-                                {{ applicableRate ? applicableRate.toFixed(2) : (isRateLoadingInModal ? 'Cargando...' :
-                                    'N/A') }}
+                                {{ applicableRate ? applicableRate.toFixed(2) : (isRateLoadingInModal ? 'Buscando...' :
+                                'N/A') }}
                                 <span v-if="actualDateOfRate && actualDateOfRate !== formData.date && applicableRate"
                                     class="text-xs italic">
                                     (del {{ formatDate(actualDateOfRate) }})
                                 </span>
                             </strong>
-                            <button v-if="!isRateLoadingInModal && !applicableRate && formData.date"
-                                @click.prevent="() => attemptFetchRateForSelectedDate(formData.date)"
-                                class="ml-2 text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline">
-                                (Reintentar API)
-                            </button>
                         </p>
+
+                        <div v-if="showStaleRateChoice" class="p-2 border border-amber-500 rounded-md text-center">
+                            <p class="text-xs mb-2">{{ rateErrorMessageForModal }}</p>
+                            <div class="flex justify-center gap-2">
+                                <button @click.prevent="handleUseStaleRate"
+                                    class="px-2 py-1 bg-secondary-500 text-white text-xs font-medium rounded hover:bg-secondary-600 dark:bg-dark-secondary-500 dark:hover:bg-dark-secondary-600 transition-all">
+                                    Usar esta tasa ({{ staleRateInfo.rate }})
+                                </button>
+                                <button @click.prevent="handleEnterManualInstead"
+                                    class="px-2 py-1 bg-neutral-500 text-white text-xs font-medium rounded hover:bg-neutral-600 dark:bg-dark-neutral-600 dark:hover:bg-dark-neutral-700 transition-all">
+                                    Ingresar Manualmente
+                                </button>
+                            </div>
+                        </div>
+
+                        <div v-if="showManualRateInput && !isRateLoadingInModal && !showStaleRateChoice"
+                            class="flex items-center gap-2">
+                            <input type="number" v-model.number="manualRateInput"
+                                placeholder="Tasa manual para esta fecha" min="0" step="any"
+                                class="flex-grow block w-full px-2 py-1 border border-neutral-300 rounded-md shadow-sm text-sm dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base" />
+                            <button @click.prevent="applyManualRate"
+                                :disabled="!manualRateInput || manualRateInput <= 0"
+                                class="px-2 py-1 bg-accent-500 text-white text-xs font-medium rounded-md shadow-sm hover:bg-accent-600 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-dark-accent-400 dark:hover:bg-dark-accent-500">
+                                Aplicar
+                            </button>
+                        </div>
+
                         <p>Monto USD (Calculado): <strong class="dark:text-dark-secondary-300">${{ amountUsdDisplay
-                                }}</strong></p>
+                        }}</strong></p>
                     </div>
 
                     <div>
@@ -332,7 +379,7 @@ const amountUsdDisplay = computed(() => {
                             Cancelar
                         </button>
                         <button type="submit"
-                            :disabled="isRateLoadingInModal || !!rateErrorMessageForModal && !actualDateOfRate || !formData.amountBs || formData.amountBs <= 0 || !formData.date || !formData.description || (!applicableRate && !isRateLoadingInModal)"
+                            :disabled="isRateLoadingInModal || showStaleRateChoice || !applicableRate || !formData.amountBs || formData.amountBs <= 0 || !formData.date || !formData.description"
                             class="px-4 py-2 cursor-pointer bg-accent-500 text-white font-semibold transition-all rounded-md shadow-sm hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-dark-accent-400 dark:text-dark-text-base dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400 dark:focus:ring-offset-dark-contrast">
                             {{ isEditing ? 'Guardar Cambios' : 'Añadir Movimiento' }}
                         </button>
