@@ -23,6 +23,7 @@ let clickListener = null;
 const columns = computed(() => [
     { // Columna 0
         title: 'Produccion', data: null,
+        responsivePriority: 1,
         render: (data, type, row) => `${row.productName || 'Receta Desconocida'} <br><span class='text-xs text-text-muted dark:text-dark-text-muted'>Lote: ${row.batchSize || '?'}</span>`
     },
     { data: 'date', title: 'Fecha' }, // Columna 1

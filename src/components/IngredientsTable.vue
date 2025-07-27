@@ -65,11 +65,12 @@ function renderStockLevelBar(data, type, row) {
 
 // --- Definición de Columnas (Ajustar render de Acciones) ---
 const columns = [
-    { data: 'name', title: 'Nombre' },
+    { data: 'name', title: 'Nombre', responsivePriority: 1 },
     {
         title: 'Stock', // Nueva columna para Stock Actual
         data: 'currentStock',
-        render: (data, type, row) => `${Number(data || 0).toFixed(1)} ${row.unit || ''}` // Muestra stock y unidad
+        render: (data, type, row) => `${Number(data || 0).toFixed(1)} ${row.unit || ''}`, // Muestra stock y unidad
+        responsivePriority: 2
     },
     {
         title: 'Nivel', // Nueva columna para Barra de Progreso

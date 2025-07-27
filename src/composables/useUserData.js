@@ -551,7 +551,7 @@ async function addProductionRecord(recordData) {
                     const originalGlobalIng = globalIngredients.value[globalIngIndex];
                     originalIngredientStatesForRollback.push({ index: globalIngIndex, oldStock: originalGlobalIng.currentStock });
 
-                    const quantityUsed = (Number(recipeIng.quantity) || 0) * recordToAdd.batchSize;
+                    const quantityUsed = (Number(recipeIng.quantity) || 0);
                     if (quantityUsed > 0) {
                         const newStock = (Number(originalGlobalIng.currentStock) || 0) - quantityUsed;
                         globalIngredients.value[globalIngIndex] = { ...originalGlobalIng, currentStock: newStock }; // Optimistic local stock update
@@ -708,7 +708,7 @@ async function deleteProductionRecord(recordId) {
                     const originalGlobalIng = globalIngredients.value[globalIngIndex];
                     originalIngredientStatesForRollback.push({ index: globalIngIndex, oldStock: originalGlobalIng.currentStock });
 
-                    const quantityToRestore = (Number(recipeIng.quantity) || 0) * (Number(recordToDelete.batchSize) || 0);
+                    const quantityToRestore = (Number(recipeIng.quantity) || 0);
                     if (quantityToRestore > 0) {
                         const restoredStock = (Number(originalGlobalIng.currentStock) || 0) + quantityToRestore;
                         globalIngredients.value[globalIngIndex] = { ...originalGlobalIng, currentStock: restoredStock }; // Optimistic
