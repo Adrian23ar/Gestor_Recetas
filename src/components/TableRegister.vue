@@ -110,7 +110,6 @@ const options = {
         // La celda de "Vendido" en el footer no mostrará un total.
         if (footerCells.length >= 7) { // Corresponde al número de <th> en <tfoot>
             // La primera celda del footer (colspan=2) es para "TOTALES:"
-            // Las siguientes celdas corresponden a los totales
             footerCells[1].innerHTML = formatCurrency(totalRevenue); // Columna Ingreso Total
             footerCells[2].innerHTML = formatCurrency(totalOperatingCostRecipeOnly); // Columna Gastos Op.
             footerCells[3].innerHTML = formatCurrency(totalLaborCostForBatch); // Columna Mano de Obra

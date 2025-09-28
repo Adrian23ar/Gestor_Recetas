@@ -4,6 +4,7 @@ import ConfirmationModal from '../components/ConfirmationModal.vue';
 import EditIngredientModal from '../components/EditIngredientModal.vue';
 import IngredientsTable from '../components/IngredientsTable.vue';
 import EditStockModal from '../components/EditStockModal.vue';
+import ErrorMessage from '../components/ErrorMessage.vue';
 
 import { useIngredients } from '../composables/useIngredients.js';
 import { useToast } from "vue-toastification";
@@ -263,7 +264,9 @@ const unknownStockCount = computed(() => ingredients.value.filter((i) => getStoc
             </h2>
 
             <div v-if="dataLoading" class="text-text-muted dark:text-dark-text-muted italic">Cargando resumen...</div>
-            <div v-else-if="dataError" class="text-danger-600 dark:text-danger-400">Error al cargar datos.</div>
+            <div v-else-if="dataError" class="p-4">
+                <ErrorMessage :message="`Error al cargar ingredientes: ${dataError}`" />
+            </div>
             <div v-else class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
                 <div>
                     <span class="block text-2xl font-bold text-primary-700 dark:text-dark-primary-300">

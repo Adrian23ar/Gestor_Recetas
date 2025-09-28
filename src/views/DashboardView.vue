@@ -5,6 +5,8 @@ import RecipeCard from '../components/RecipeCard.vue';
 import AddRecipeModal from '../components/AddRecipeModal.vue';
 import EditRecipeModal from '../components/EditRecipeModal.vue';
 import ConfirmationModal from '../components/ConfirmationModal.vue';
+import ErrorMessage from '../components/ErrorMessage.vue';
+
 // Desestructuramos todo desde el composable para usar en template y lógica
 const {
   recipes,
@@ -49,9 +51,8 @@ const {
                 dark:text-dark-text-muted">
       Cargando recetas...
     </div>
-    <div v-else-if="dataError" class="text-center py-10 text-danger-600 font-medium
-                dark:text-danger-400">
-      Error al cargar recetas: {{ dataError }}
+    <div v-else-if="dataError" class="mt-4">
+      <ErrorMessage :message="dataError" />
     </div>
     <div v-else-if="recipes.length === 0" class="text-center py-10 text-text-muted italic
                 dark:text-dark-text-muted">
@@ -59,35 +60,19 @@ const {
     </div>
     <TransitionGroup v-else tag="div" name="card-list"
       class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-      <RecipeCard
-        v-for="recipe in recipes"
-        :key="recipe.id"
-        :recipe="recipe"
-        :globalIngredients="globalIngredients"
-        @delete-recipe="requestDeleteRecipeConfirmation"
-        @edit-recipe="openEditRecipeModal(recipe)"
-      />
+      <RecipeCard v-for="recipe in recipes" :key="recipe.id" :recipe="recipe" :globalIngredients="globalIngredients"
+        @delete-recipe="requestDeleteRecipeConfirmation" @edit-recipe="openEditRecipeModal(recipe)" />
     </TransitionGroup>
 
     <AddRecipeModal :show="isAddModalOpen" @close="closeAddRecipeModal" @add="handleAddRecipe" />
 
-    <EditRecipeModal
-      v-if="isEditModalOpen && editingRecipe"
-      :show="isEditModalOpen"
-      :recipe="editingRecipe"
-      :globalIngredients="globalIngredients"
-      @close="closeEditRecipeModal"
-      @save="handleSaveRecipe"
-    />
+    <EditRecipeModal v-if="isEditModalOpen && editingRecipe" :show="isEditModalOpen" :recipe="editingRecipe"
+      :globalIngredients="globalIngredients" @close="closeEditRecipeModal" @save="handleSaveRecipe" />
 
-    <ConfirmationModal
-      :show="showDeleteRecipeModal"
-      title="Confirmar Eliminación de Receta"
+    <ConfirmationModal :show="showDeleteRecipeModal" title="Confirmar Eliminación de Receta"
       :message="`¿Estás seguro de que deseas eliminar la receta '${recipeToDeleteName}'? Esta acción no se puede deshacer.`"
       confirmButtonText="Sí, Eliminar Receta"
       confirmButtonClass="bg-danger-600 hover:bg-danger-700 focus:ring-danger-500 dark:bg-danger-700 dark:hover:bg-danger-800 dark:focus:ring-danger-600 dark:text-dark-text-base"
-      @close="cancelRecipeDeletion"
-      @confirm="confirmRecipeDeletion"
-    />
+      @close="cancelRecipeDeletion" @confirm="confirmRecipeDeletion" />
   </div>
 </template>

@@ -2,10 +2,11 @@
 //src/views/AccountingView.vue
 import { ref, computed, onMounted, watch } from 'vue'; // Añadido onMounted y watch
 import { useAccountingData } from '../composables/useAccountingData';
+import { useToast } from 'vue-toastification';
 import TransactionModal from '../components/TransactionModal.vue';
 import ConfirmationModal from '../components/ConfirmationModal.vue';
 import AccountingTransactionsTable from '../components/AccountingTransactionsTable.vue'; // Import new component
-import { useToast } from 'vue-toastification';
+import ErrorMessage from '../components/ErrorMessage.vue';
 
 const toast = useToast();
 const {
@@ -373,7 +374,7 @@ watch(accountingError, (newError) => {
                     </button>
                 </div>
                 <p v-if="rateUpdateError" class="text-xs text-danger-600 dark:text-danger-400 mt-1">{{ rateUpdateError
-                    }}</p>
+                }}</p>
                 <p v-if="accountingError && !rateUpdateError && !showRatePromptMessage"
                     class="text-xs text-danger-600 dark:text-danger-400 mt-1">
                     Error API: {{ accountingError }}
@@ -419,13 +420,14 @@ watch(accountingError, (newError) => {
         </div>
         <div v-else-if="criticalErrorPreventingDisplay"
             class="text-center py-10 text-danger-600 font-medium dark:text-danger-400">
-            <p>{{ criticalErrorPreventingDisplay }}</p>
-            <div v-if="showRatePromptMessage" class="mt-4 text-sm text-text-muted dark:text-dark-text-muted">
-                <p>Por favor, ingrese la tasa del día manualmente en la sección "Tasa del Día (Bs/USD)" más arriba para
-                    continuar.</p>
-                <p class="mt-2">Una vez ingresada la tasa, los datos y la tabla de transacciones se mostrarán si no hay
-                    otros errores.</p>
-            </div>
+            <ErrorMessage :message="criticalErrorPreventingDisplay">
+                <template v-if="showRatePromptMessage">
+                    <p class="mt-4 text-sm text-text-muted dark:text-dark-text-muted">
+                        Por favor, ingrese la tasa del día manualmente en la sección "Tasa del Día (Bs/USD)" más arriba
+                        para continuar.
+                    </p>
+                </template>
+            </ErrorMessage>
         </div>
         <div v-else-if="transactions.length === 0 && !accountingLoading"
             class="text-center py-10 text-text-muted italic dark:text-dark-text-muted">
