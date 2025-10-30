@@ -23,6 +23,10 @@ const editableRecipe = ref(null);
 const selectedIngredientId = ref('');
 const newIngredientQuantity = ref(null);
 
+// --- NUEVO (Fase 2.1) ---
+const editIngredientId = ref(null);
+// --------------------
+
 watch(() => props.recipe, (newRecipe) => {
     if (newRecipe) {
         editableRecipe.value = JSON.parse(JSON.stringify(newRecipe));
@@ -37,32 +41,87 @@ watch(() => props.recipe, (newRecipe) => {
     } else {
         editableRecipe.value = null;
     }
+    // Limpiar formulario si la receta cambia o se cierra el modal
+    clearForm();
 }, { immediate: true });
 
 // --- Lógica de Ingredientes de la Receta ---
-function addRecipeIngredient() {
-    if (!selectedIngredientId.value || newIngredientQuantity.value === null || newIngredientQuantity.value <= 0) {
-        alert('Selecciona un ingrediente y especifica una cantidad válida mayor a cero.');
-        return;
-    }
-    const existing = editableRecipe.value.ingredients.find(ing => ing.ingredientId === selectedIngredientId.value);
-    if (existing) {
-        alert('Este ingrediente ya está en la receta. Puedes modificar su cantidad o eliminarlo.');
-        return;
-    }
-    editableRecipe.value.ingredients.push({
-        ingredientId: selectedIngredientId.value,
-        quantity: parseFloat(newIngredientQuantity.value),
-    });
+
+// --- NUEVO (Fase 3.1) ---
+/**
+ * Resetea el formulario de ingredientes y sale del modo edición.
+ */
+function clearForm() {
     selectedIngredientId.value = '';
     newIngredientQuantity.value = null;
+    editIngredientId.value = null;
 }
 
+// --- NUEVO (Fase 2.2) ---
+/**
+ * Inicia el modo edición para un ingrediente de la receta.
+ * @param {object} recipeIng - El ingrediente de la receta (ej. { ingredientId: 'xyz', quantity: 100 })
+ */
+function startEdit(recipeIng) {
+    selectedIngredientId.value = recipeIng.ingredientId;
+    newIngredientQuantity.value = recipeIng.quantity;
+    editIngredientId.value = recipeIng.ingredientId;
+}
+
+// --- MODIFICADO (Fase 3.2) ---
+/**
+ * Guarda (añade o actualiza) un ingrediente en la lista de la receta.
+ */
+function saveRecipeIngredient() {
+    if (newIngredientQuantity.value === null || newIngredientQuantity.value <= 0) {
+        alert('Especifica una cantidad válida mayor a cero.');
+        return;
+    }
+
+    // --- LÓGICA DE ACTUALIZACIÓN (Modo Edición) ---
+    if (editIngredientId.value) {
+        const ingredientToUpdate = editableRecipe.value.ingredients.find(
+            (ing) => ing.ingredientId === editIngredientId.value
+        );
+        if (ingredientToUpdate) {
+            ingredientToUpdate.quantity = parseFloat(newIngredientQuantity.value);
+        }
+    }
+    // --- LÓGICA DE AÑADIR (Modo Añadir) ---
+    else {
+        if (!selectedIngredientId.value) {
+            alert('Selecciona un ingrediente.');
+            return;
+        }
+        const existing = editableRecipe.value.ingredients.find(
+            (ing) => ing.ingredientId === selectedIngredientId.value
+        );
+        if (existing) {
+            alert('Este ingrediente ya está en la receta. Usa el botón "Editar" para modificar su cantidad.');
+            return;
+        }
+        editableRecipe.value.ingredients.push({
+            ingredientId: selectedIngredientId.value,
+            quantity: parseFloat(newIngredientQuantity.value),
+        });
+    }
+
+    // Limpiar el formulario y salir del modo edición
+    clearForm();
+}
+
+// --- MODIFICADO (Fase 4.1) ---
 function removeRecipeIngredient(ingredientIdToRemove) {
     editableRecipe.value.ingredients = editableRecipe.value.ingredients.filter(
         (ing) => ing.ingredientId !== ingredientIdToRemove
     );
+
+    // Si el ingrediente eliminado era el que se estaba editando, limpiar el formulario
+    if (ingredientIdToRemove === editIngredientId.value) {
+        clearForm();
+    }
 }
+// --- FIN MODIFICACIONES DE LÓGICA ---
 
 function getIngredientDetails(recipeIngredient) {
     const global = props.globalIngredients.find(g => g.id === recipeIngredient.ingredientId);
@@ -71,15 +130,16 @@ function getIngredientDetails(recipeIngredient) {
 
 // --- Cálculos Reactivos de Costos (Computed Properties) ---
 const calculatedCosts = computed(() => {
+    // ... (lógica de computed existente sin cambios)
     const defaults = {
-        totalIngredientCost: 0,          // Costo total de ingredientes para el lote
-        recipeOnlyCost: 0,               // NUEVO: Costo total de la receta (solo ingredientes + empaque) para el lote
-        laborCostPerIndividualItem: 0,   // NUEVO: Costo de mano de obra por ítem individual
-        baseCostPerIndividualItem: 0,    // MODIFICADO: Costo base por ítem (solo ingredientes + empaque por ítem)
-        totalCostPerIndividualItem: 0,   // Costo total por ítem individual (base + mano de obra), usado para PVP
-        sellingPrice: 0,                 // Precio de Venta Sugerido por ítem
-        finalPrice: 0,                   // Precio Final por ítem
-        ingredientCosts: {}              // Costos detallados por ingrediente
+        totalIngredientCost: 0,
+        recipeOnlyCost: 0,
+        laborCostPerIndividualItem: 0,
+        baseCostPerIndividualItem: 0,
+        totalCostPerIndividualItem: 0,
+        sellingPrice: 0,
+        finalPrice: 0,
+        ingredientCosts: {}
     };
 
     if (!editableRecipe.value || !props.globalIngredients) {
@@ -103,30 +163,15 @@ const calculatedCosts = computed(() => {
 
     const packagingCostPerBatch = Number(editableRecipe.value.packagingCostPerBatch || 0);
     const laborCostPerBatch = Number(editableRecipe.value.laborCostPerBatch || 0);
-    const itemsPerBatch = Number(editableRecipe.value.itemsPerBatch || 1); // Evitar división por cero
+    const itemsPerBatch = Number(editableRecipe.value.itemsPerBatch || 1);
     const profitMarginPercent = Number(editableRecipe.value.profitMarginPercent || 0);
     const lossBufferPercent = Number(editableRecipe.value.lossBufferPercent || 0);
 
-    // 1. Costo Total por Receta (solo ingredientes y empaque del lote)
-    // Este es el "Costo Total por Receta" que solo suma ingredientes y empaque.
     const currentRecipeOnlyCost = calculatedTotalIngredientCost + packagingCostPerBatch;
-
-    // 2. Costo de Mano de Obra por Item Individual
-    // El costo total de la mano de obra se dividirá entre el lote de producción.
     const currentLaborCostPerIndividualItem = itemsPerBatch > 0 ? laborCostPerBatch / itemsPerBatch : 0;
-
-    // 3. Costo Base por Item Individual (ingredientes + empaque, por ítem)
-    // Este es el "Costo Base por Item individual" solicitado.
     const currentBaseCostPerIndividualItem = itemsPerBatch > 0 ? currentRecipeOnlyCost / itemsPerBatch : 0;
-
-    // 4. Costo Total por Item Individual (para cálculo de precio de venta)
-    // Este es la suma de (ingredientes + empaque por ítem) + (mano de obra por ítem)
     const currentTotalCostPerIndividualItem = currentBaseCostPerIndividualItem + currentLaborCostPerIndividualItem;
-
-    // 5. Calcular Precio de Venta (basado en el costo total por ítem individual + ganancia)
     const currentSellingPrice = currentTotalCostPerIndividualItem * (1 + profitMarginPercent / 100);
-
-    // 6. Calcular Precio Final (precio de venta + margen de pérdida/buffer)
     const currentFinalPrice = currentSellingPrice * (1 + lossBufferPercent / 100);
 
     return {
@@ -183,8 +228,6 @@ function saveChanges() {
         editableRecipe.value.calculatedFinalPrice = calculatedCosts.value.finalPrice;
     }
 
-
-
     emit('save', { ...editableRecipe.value });
     closeModal();
 }
@@ -224,6 +267,7 @@ function formatCurrency(value) {
                                  dark:border-dark-neutral-700">
                         <h4 class="text-lg font-medium mb-3 text-primary-700
                                    dark:text-dark-primary-300">Ingredientes de la Receta</h4>
+
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-3 bg-neutral-100 rounded
                                     dark:bg-dark-neutral-800">
                             <div>
@@ -233,7 +277,8 @@ function formatCurrency(value) {
                                     :options="globalIngredients" :searchable="true" valueProp="id" label="name"
                                     trackBy="name" :clearOnSelect="true" :closeOnSelect="true" placeholder="Buscar..."
                                     noOptionsText="Lista vacía o no encontrada"
-                                    noResultsText="No se encontraron ingredientes" :classes="{
+                                    noResultsText="No se encontraron ingredientes" :disabled="editIngredientId !== null"
+                                    :classes="{
                                         container: 'relative mx-auto w-full flex items-center justify-end box-border cursor-pointer border border-neutral-300 rounded-md bg-contrast text-base leading-snug outline-none mt-1 dark:border-dark-neutral-700 dark:bg-dark-contrast',
                                         containerActive: 'ring-2 ring-accent-500/50 border-accent-500 dark:ring-dark-accent-400/50 dark:border-dark-accent-400',
                                         singleLabelText: 'overflow-ellipsis overflow-hidden block whitespace-nowrap max-w-full text-text-base dark:text-dark-text-base',
@@ -267,14 +312,24 @@ function formatCurrency(value) {
                                 <span class="text-xs text-text-muted
                                              dark:text-dark-text-muted">Usar misma unidad base (Gr, Ml, Uni)</span>
                             </div>
+
                             <div class="flex items-center">
-                                <button @click="addRecipeIngredient" class="w-full px-4 py-2 bg-secondary-500 text-white font-medium rounded-md shadow-sm transition-all hover:bg-secondary-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary-500
-                                           dark:bg-dark-secondary-600 dark:text-dark-text-base dark:hover:bg-dark-secondary-700
-                                           dark:focus:ring-dark-secondary-600 dark:focus:ring-offset-dark-neutral-800">
-                                    Añadir
-                                </button>
+                                <div class="flex items-center space-x-2 w-full">
+                                    <button @click.prevent="saveRecipeIngredient"
+                                        :class="[editIngredientId ? 'bg-accent-500 hover:bg-accent-600 focus:ring-accent-500 dark:bg-dark-accent-400 dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400' : 'bg-secondary-500 hover:bg-secondary-600 focus:ring-secondary-500 dark:bg-dark-secondary-600 dark:hover:bg-dark-secondary-700 dark:focus:ring-dark-secondary-600']"
+                                        class="w-full px-4 py-2 text-white font-medium rounded-md shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 dark:text-dark-text-base dark:focus:ring-offset-dark-neutral-800">
+                                        {{ editIngredientId ? 'Actualizar' : 'Añadir' }}
+                                    </button>
+
+                                    <button v-if="editIngredientId" @click.prevent="clearForm"
+                                        class="w-auto px-4 py-2 bg-neutral-300 text-text-base transition-all rounded-md hover:bg-neutral-400
+                                               dark:bg-dark-neutral-700 dark:text-dark-text-base dark:hover:bg-dark-neutral-600">
+                                        Cancelar
+                                    </button>
+                                </div>
                             </div>
                         </div>
+
                         <div v-if="editableRecipe.ingredients.length === 0" class="text-text-muted text-sm
                                     dark:text-dark-text-muted">
                             No hay ingredientes añadidos a esta receta.
@@ -295,10 +350,19 @@ function formatCurrency(value) {
                                             }})
                                         </span>
                                     </span>
-                                    <button @click="removeRecipeIngredient(recipeIng.ingredientId)" class="bg-danger-600 text-white px-2 py-1 rounded hover:bg-danger-700 text-xs transition-all font-medium
-                                                 dark:bg-danger-700 dark:text-dark-text-base dark:hover:bg-danger-800">
-                                        Quitar
-                                    </button>
+
+                                    <div class="flex items-center space-x-2 flex-shrink-0">
+                                        <button @click="startEdit(recipeIng)" class="bg-secondary-600 text-white px-2 py-1 rounded hover:bg-secondary-700 text-xs transition-all font-medium
+                                                   dark:bg-dark-secondary-500 dark:hover:bg-dark-secondary-600">
+                                            Editar
+                                        </button>
+                                        <button @click="removeRecipeIngredient(recipeIng.ingredientId)"
+                                            class="bg-danger-600 text-white px-2 py-1 rounded hover:bg-danger-700 text-xs transition-all font-medium
+                                                     dark:bg-danger-700 dark:text-dark-text-base dark:hover:bg-danger-800">
+                                            Quitar
+                                        </button>
+                                    </div>
+
                                 </template>
                                 <span v-else class="text-danger-600 text-xs
                                                  dark:text-danger-400">Error: Ingrediente no encontrado (ID: {{
