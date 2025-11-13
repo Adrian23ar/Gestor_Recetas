@@ -8,6 +8,7 @@ export function useIngredients() {
     // Corregido: usamos globalIngredients (no ingredients)
     const {
         globalIngredients,
+        recipes,
         addIngredient,
         deleteIngredient,
         saveIngredient,
@@ -30,8 +31,29 @@ export function useIngredients() {
 
     // Funciones para abrir/cerrar modales
     function openDeleteModal(ingredient) {
-        ingredientToDelete.value = ingredient;
-        showDeleteModal.value = true;
+        if (!ingredient || !ingredient.id) {
+            toast.error("Error: No se pudo identificar el ingrediente a eliminar.");
+            return;
+        }
+
+        const ingredienteId = ingredient.id;
+
+        // 1. Buscar el ingrediente en las recetas
+        const recetasQueLoUsan = recipes.value.filter(receta =>
+            Array.isArray(receta.ingredients) && // Asegurarse de que la receta tenga un array de ingredientes
+            receta.ingredients.some(ing => ing.ingredientId === ingredienteId)
+        );
+
+        // 2. Comprobar si se encontró en alguna receta
+        if (recetasQueLoUsan.length > 0) {
+            // 3. Si se usa, mostrar error y NO abrir el modal
+            // Muestra la primera receta que lo usa como ejemplo
+            toast.error(`No se puede eliminar: el ingrediente está en uso en la receta "${recetasQueLoUsan[0].name}" (y posiblemente en ${recetasQueLoUsan.length - 1} más).`);
+        } else {
+            // 4. Si no se usa, proceder a abrir el modal de confirmación como antes
+            ingredientToDelete.value = ingredient;
+            showDeleteModal.value = true;
+        }
     }
 
     function closeDeleteModal() {
