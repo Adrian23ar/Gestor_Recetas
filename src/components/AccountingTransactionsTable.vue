@@ -1,6 +1,7 @@
 <script setup>
 //src/components/AccountingTransactionsTable.vue
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import { formatCurrency } from '../utils/utils.js';
 import DataTable from 'datatables.net-vue3';
 import DataTablesCore from 'datatables.net-dt';
 import DataTablesResponsive from 'datatables.net-responsive-dt';
@@ -63,7 +64,7 @@ const columns = computed(() => [
     },
     { // Columna 4: Monto (Bs.)
         title: 'Monto (Bs.)', data: 'amountBs', className: 'text-right',
-        render: (data) => formatCurrencyBs(data)
+        render: (data) => formatCurrency(data, 'Bs.')
     },
     { // Columna 5: Tasa (Bs/USD)
         title: 'Tasa (Bs/USD)', data: 'exchangeRate', className: 'text-right',
@@ -71,7 +72,7 @@ const columns = computed(() => [
     },
     { // Columna 6: Monto (USD)
         title: 'Monto (USD)', data: 'amountUsd', className: 'text-right',
-        render: (data) => formatCurrencyUsd(data)
+        render: (data) => formatCurrency(data, '$')
     },
     { // Columna 7: Acciones
         title: 'Acciones', data: null, orderable: false, searchable: false, responsivePriority: 1, className: 'text-center',

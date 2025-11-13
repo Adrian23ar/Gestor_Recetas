@@ -5,7 +5,8 @@ import { useAccountingData } from '../composables/useAccountingData';
 import { useToast } from 'vue-toastification';
 import TransactionModal from '../components/TransactionModal.vue';
 import ConfirmationModal from '../components/ConfirmationModal.vue';
-import AccountingTransactionsTable from '../components/AccountingTransactionsTable.vue'; // Import new component
+import AccountingTransactionsTable from '../components/AccountingTransactionsTable.vue';
+import { formatCurrency } from '../utils/utils.js';
 import ErrorMessage from '../components/ErrorMessage.vue';
 
 const toast = useToast();
@@ -342,7 +343,7 @@ watch(accountingError, (newError) => {
                 </div>
                 <p v-else-if="currentDailyRate"
                     class="text-center text-3xl font-bold text-secondary-700 dark:text-dark-secondary-300 mb-2">
-                    {{ formatCurrency(currentDailyRate, '') }}
+                    {{ formatCurrency(currentDailyRate, '', false) }}
                 </p>
                 <p v-else-if="!accountingError && !currentDailyRate"
                     class="text-center text-3xl font-bold text-warning-600 dark:text-warning-400 mb-2">
@@ -382,7 +383,7 @@ watch(accountingError, (newError) => {
                 <p v-if="lastRateDate && !rateFetchingLoading"
                     class="text-xs text-text-muted dark:text-dark-text-muted mt-1">
                     Última tasa guardada: {{ formatDate(lastRateDate) }}
-                    ({{ currentDailyRate ? formatCurrency(currentDailyRate, '') : 'N/A' }})
+                    ({{ currentDailyRate ? formatCurrency(currentDailyRate, '', false) : 'N/A' }})
                 </p>
             </div>
         </div>

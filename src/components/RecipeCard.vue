@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue';
+import { formatCurrency } from '../utils/utils.js';
 
 const props = defineProps({
   recipe: {
@@ -45,9 +46,6 @@ const displayInfo = computed(() => {
   return `PVP Final: ${formatCurrency(finalPrice)}`;
 });
 
-function formatCurrency(value) {
-  return `$${Number(value).toFixed(2)}`;
-}
 </script>
 
 <template>

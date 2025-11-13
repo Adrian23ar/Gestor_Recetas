@@ -1,17 +1,13 @@
 <script setup>
 // src/components/TableRegister.vue
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import { formatCurrency } from '../utils/utils.js';
 import DataTable from 'datatables.net-vue3';
 import DataTablesCore from 'datatables.net-dt';
 import DataTablesResponsive from 'datatables.net-responsive-dt';
 
 DataTable.use(DataTablesCore);
 DataTable.use(DataTablesResponsive);
-
-function formatCurrency(value) {
-    const num = Number(value);
-    return isNaN(num) ? '$0.00' : `$${num.toFixed(2)}`;
-}
 
 const props = defineProps({ records: { type: Array, default: () => [] } });
 const emit = defineEmits(['edit-record', 'delete-record']);

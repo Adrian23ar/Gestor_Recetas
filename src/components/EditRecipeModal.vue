@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 import Multiselect from '@vueform/multiselect';
+import { formatCurrency } from '../utils/utils.js';
 
 const props = defineProps({
     recipe: {
@@ -230,11 +231,6 @@ function saveChanges() {
 
     emit('save', { ...editableRecipe.value });
     closeModal();
-}
-
-// --- Helper para formato ---
-function formatCurrency(value) {
-    return `$${Number(value).toFixed(2)}`;
 }
 
 </script>

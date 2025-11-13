@@ -1,5 +1,6 @@
 <script setup>
 import { defineProps, defineEmits, ref, onMounted, onBeforeUnmount } from 'vue';
+import { formatCurrency } from '../utils/utils.js';
 import DataTable from 'datatables.net-vue3';
 import DataTablesCore from 'datatables.net-dt';
 import DataTablesResponsive from 'datatables.net-responsive-dt';
@@ -7,12 +8,6 @@ import DataTablesResponsive from 'datatables.net-responsive-dt';
 // Integrar DataTables con el componente Vue
 DataTable.use(DataTablesCore);
 DataTable.use(DataTablesResponsive);
-
-// Helper para formato de moneda (puedes moverlo a utils si lo usas en más sitios)
-function formatCurrency(value) {
-    const num = Number(value);
-    return isNaN(num) ? '$0.00' : `$${num.toFixed(2)}`;
-}
 
 const props = defineProps({
     ingredients: {
