@@ -76,13 +76,14 @@ mi-pasteleria-app/
 │   ├── assets/
 │   │   └── style.css          # Estilos globales y de Tailwind
 │   ├── composables/           # Lógica reutilizable (Vue Composables)
-│   │   ├── useAccountingData.js
 │   │   ├── useAuth.js
 │   │   ├── useEventHistory.js
 │   │   ├── useLocalStorage.js
-│   │   └── useUserData.js
 │   ├── router/
 │   │   └── index.js           # Configuración de rutas de Vue Router
+│   ├── stores/                # Gestores de estado globales (Pinia)
+│   │   ├── userData.js
+│   │   └── accountingData.js
 │   ├── views/                 # Componentes de página (Vistas)
 │   │   ├── AccountingView.vue
 │   │   ├── DashboardView.vue
@@ -90,7 +91,7 @@ mi-pasteleria-app/
 │   │   ├── IngredientsView.vue
 │   │   └── RegisterView.vue   # Para el registro de producción
 │   ├── App.vue                # Componente raíz de la aplicación
-│   └── main.js                # Punto de entrada, inicialización de Vue y Firebase
+│   └── main.js                # Punto de entrada, inicialización de Vue, Pinia y Firebase
 ├── .vscode/
 │   └── extensions.json      # Recomendaciones de extensiones para VS Code
 ├── index.html               # Plantilla HTML principal
@@ -164,13 +165,3 @@ La aplicación utiliza una API para obtener la tasa de cambio del BCV. En `src/c
     ```
 
 Accede a la aplicación a través de la URL proporcionada por Vite (generalmente `http://localhost:5173` en modo desarrollo).
-
-## Próximos Pasos / Mejoras Potenciales
-
-* Implementar pruebas unitarias y de integración.
-* Mejorar la gestión de errores y feedback al usuario.
-* Optimizar el rendimiento para grandes cantidades de datos.
-* Añadir más funcionalidades al módulo de contabilidad (reportes, balances, etc.).
-* Refinar la interfaz de usuario y la experiencia de usuario (UX).
-* Considerar la paginación del lado del servidor para tablas con muchos datos.
-* Mover tokens de API sensibles a variables de entorno del lado del servidor si se interactúa a través de un backend propio, o asegurar que el uso del lado del cliente sea seguro según las políticas de la API.
