@@ -1,18 +1,17 @@
 // src/composables/useDashboard.js
 import { ref, computed, watch } from 'vue';
-import { useUserData } from './useUserData.js';
+import { useUserDataStore } from '../stores/userData';
+import { storeToRefs } from 'pinia';
 import { useToast } from 'vue-toastification';
 
 export function useDashboard() {
-  const {
-    recipes,
-    globalIngredients,
-    dataLoading,
-    dataError,
-    deleteRecipe,
-    saveRecipe,
-    addRecipe,
-  } = useUserData();
+const userDataStore = useUserDataStore();
+
+// storeToRefs es necesario para mantener la reactividad en el estado (refs)
+const { recipes, globalIngredients, dataLoading, dataError } = storeToRefs(userDataStore);
+
+// Las acciones se pueden desestructurar directamente del store
+const { deleteRecipe, saveRecipe, addRecipe } = userDataStore;
 
   const toast = useToast();
 

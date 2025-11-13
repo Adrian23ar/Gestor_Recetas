@@ -1,7 +1,8 @@
 <script setup>
 //src/views/AccountingView.vue
 import { ref, computed, onMounted, watch } from 'vue'; // Añadido onMounted y watch
-import { useAccountingData } from '../composables/useAccountingData';
+import { useAccountingDataStore } from '../stores/accountingData';
+import { storeToRefs } from 'pinia';
 import { useToast } from 'vue-toastification';
 import TransactionModal from '../components/TransactionModal.vue';
 import ConfirmationModal from '../components/ConfirmationModal.vue';
@@ -10,22 +11,30 @@ import { formatCurrency } from '../utils/utils.js';
 import ErrorMessage from '../components/ErrorMessage.vue';
 
 const toast = useToast();
+
+const accountingStore = useAccountingDataStore();
+
+// El estado (refs) que usas en el template debe ser extraído con storeToRefs
 const {
     transactions,
     currentDailyRate,
-    exchangeRates, // Para obtener la fecha de la última tasa
-    accountingLoading, // Carga general
-    rateFetchingLoading, // Carga específica de la tasa API
-    accountingError, // Error general y de API
-    getRateForDate,
-    updateDailyRate,
-    addTransaction,
-    saveTransaction,
-    deleteTransaction,
-    getFilteredTransactions,
-    calculateSummary,
-    fetchAndUpdateBCVRate, // <-- Importar la función para la API
-} = useAccountingData();
+    exchangeRates,
+    accountingLoading,
+    rateFetchingLoading,
+    accountingError
+} = storeToRefs(accountingStore);
+
+// Las acciones (funciones) que usas en el script se extraen directamente
+const {
+    getRateForDate, // Lo usa openEditModal
+    updateDailyRate, // Lo usa handleUpdateRate
+    addTransaction, // Lo usa handleSaveTransaction
+    saveTransaction, // Lo usa handleSaveTransaction
+    deleteTransaction, // Lo usa confirmDeleteTransaction
+    getFilteredTransactions, // Lo usa el computed 'filteredTransactions'
+    calculateSummary, // Lo usa el computed 'summary'
+    fetchAndUpdateBCVRate, // Lo usa triggerAutoRateFetch
+} = accountingStore;
 
 // --- State for UI ---
 const isTransactionModalOpen = ref(false);
@@ -130,33 +139,6 @@ const generalError = computed(() => {
     }
     return null;
 });
-
-// --- Methods ---
-const formatCurrency = (value, symbol = 'Bs. ', useGrouping = true) => {
-    if (value === null || value === undefined || isNaN(Number(value))) {
-        return `${symbol}0.00`;
-    }
-    const numericValue = Number(value);
-    const options = {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-        useGrouping: useGrouping, // Controlar separadores de miles
-    };
-    // Para Bs. sin símbolo, solo el número formateado
-    if (symbol === '' && !useGrouping) { // Utilizado para la tasa del día
-        return numericValue.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
-    }
-
-    let formatted = numericValue.toLocaleString(symbol === '$' ? 'en-US' : 'es-VE', options);
-
-    if (symbol && symbol !== '$') { // Añadir símbolo si no es USD y se especificó
-        return `${symbol}${formatted}`;
-    }
-    if (symbol === '$') {
-        return `$${formatted}`;
-    }
-    return formatted; // Para el caso de Bs. que ya incluye el símbolo por toLocaleString
-};
 
 const formatDate = (dateString) => {
     if (!dateString) return '';
@@ -375,7 +357,7 @@ watch(accountingError, (newError) => {
                     </button>
                 </div>
                 <p v-if="rateUpdateError" class="text-xs text-danger-600 dark:text-danger-400 mt-1">{{ rateUpdateError
-                }}</p>
+                    }}</p>
                 <p v-if="accountingError && !rateUpdateError && !showRatePromptMessage"
                     class="text-xs text-danger-600 dark:text-danger-400 mt-1">
                     Error API: {{ accountingError }}

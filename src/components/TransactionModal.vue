@@ -1,7 +1,8 @@
 <script setup>
 // src/components/TransactionModal.vue
 import { ref, watch, computed, nextTick } from 'vue';
-import { useAccountingData } from '../composables/useAccountingData';
+import { useAccountingDataStore } from '../stores/accountingData';
+import { storeToRefs } from 'pinia';
 import { useToast } from 'vue-toastification';
 
 const props = defineProps({
@@ -11,13 +12,18 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save']);
 const toast = useToast();
 
+const accountingStore = useAccountingDataStore();
+
+// Estado (refs) que usas en el script/template
+const { specificDateRateError } = storeToRefs(accountingStore);
+
+// Acciones (funciones)
 const {
     getRateForExactDate,
     getLatestRateDataBefore,
     fetchRateForSpecificDateFromAPI,
-    specificDateRateError,
     updateDailyRate
-} = useAccountingData();
+} = accountingStore;
 
 // --- Estado para manejar la elección de tasa obsoleta ---
 const showStaleRateChoice = ref(false);
@@ -326,7 +332,7 @@ const amountUsdDisplay = computed(() => {
                         <p>Tasa Aplicada (Bs/USD):
                             <strong class="dark:text-dark-secondary-300">
                                 {{ applicableRate ? applicableRate.toFixed(2) : (isRateLoadingInModal ? 'Buscando...' :
-                                'N/A') }}
+                                    'N/A') }}
                                 <span v-if="actualDateOfRate && actualDateOfRate !== formData.date && applicableRate"
                                     class="text-xs italic">
                                     (del {{ formatDate(actualDateOfRate) }})

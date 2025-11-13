@@ -1,21 +1,23 @@
 // src/composables/useProductionRecords.js
 import { ref } from 'vue';
-import { useUserData } from './useUserData';
+import { useUserDataStore } from '../stores/userData';
+import { storeToRefs } from 'pinia';
 import { useToast } from 'vue-toastification';
 import { useAsyncHandler } from './useAsyncHandler';
 
 export function useProductionRecords() {
+    const userDataStore = useUserDataStore();
+
+    // Estado (refs) con storeToRefs
+    const { productionRecords, recipes, globalIngredients, dataLoading, dataError } = storeToRefs(userDataStore);
+
+    // Acciones (funciones)
     const {
-        productionRecords,
-        recipes,
-        globalIngredients,
         addProductionRecord,
         deleteProductionRecord,
-        saveProductionRecord, // This function will implicitly handle the new isSold field
-        saveIngredient,
-        dataLoading,
-        dataError,
-    } = useUserData();
+        saveProductionRecord,
+        saveIngredient
+    } = userDataStore;
 
     const toast = useToast();
     const { loading, error, runAsync } = useAsyncHandler();

@@ -1,6 +1,7 @@
 // src/main.js
 import { createApp } from 'vue'
 import App from './App.vue'
+import { createPinia } from 'pinia' // <-- AÑADE ESTA LÍNEA
 import './assets/style.css' // Importa el CSS con Tailwind
 import router from './router'
 import Toast, { POSITION } from "vue-toastification";
@@ -46,6 +47,8 @@ const options = {
 };
 
 const app = createApp(App)
+const pinia = createPinia() // <-- AÑADE ESTA LÍNEA
+app.use(pinia)
 app.use(router)
 app.use(Toast, options);
 

@@ -1,20 +1,18 @@
 // src/composables/useIngredients.js
 import { ref, computed } from 'vue';
-import { useUserData } from './useUserData';
+import { useUserDataStore } from '../stores/userData';
+import { storeToRefs } from 'pinia';
 import { useToast } from 'vue-toastification';
 import { useAsyncHandler } from './useAsyncHandler';
 
 export function useIngredients() {
-    // Corregido: usamos globalIngredients (no ingredients)
-    const {
-        globalIngredients,
-        recipes,
-        addIngredient,
-        deleteIngredient,
-        saveIngredient,
-        dataLoading,
-        dataError,
-    } = useUserData();
+    const userDataStore = useUserDataStore();
+
+    // Estado (refs) con storeToRefs
+    const { globalIngredients, recipes, dataLoading, dataError } = storeToRefs(userDataStore);
+
+    // Acciones (funciones)
+    const { addIngredient, deleteIngredient, saveIngredient } = userDataStore;
 
     const toast = useToast();
     const { loading, error, runAsync } = useAsyncHandler();
