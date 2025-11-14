@@ -1,4 +1,4 @@
-// src/composables/useAccountingData.js
+// src/stores/accountingData.js
 import { ref, computed, watch } from 'vue';
 import { defineStore } from 'pinia';
 import { useAuth } from '../composables/useAuth';
@@ -91,7 +91,6 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
     // --- Lógica de Carga de Datos (Sin cambios) ---
     let isLoadingData = false;
     async function loadAccountingData(userId) {
-        // ... (El resto de la función `loadAccountingData` se mantiene igual)
         if (isLoadingData && !userId) {
             console.log('useAccountingData: Ya en modo localStorage, no se recarga desde localStorage por loadDataFromFirestore(null).');
             accountingLoading.value = false;
@@ -133,11 +132,17 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             }
             _updateCurrentDailyRate();
         } catch (e) {
-            console.error("useAccountingData: Error cargando datos contables:", e);
-            accountingError.value = "Error al cargar datos contables.";
-            transactions.value = [];
-            exchangeRates.value = [];
-            currentDailyRate.value = null;
+            // --- MODIFICACIÓN 1.2 ---
+            if (e.code === 'unavailable') {
+                console.warn("useAccountingData: No se pudo conectar a Firestore (offline). Mostrando datos locales cacheados.");
+            } else {
+                console.error("useAccountingData: Error cargando datos contables:", e);
+                accountingError.value = "Error al cargar datos contables.";
+                transactions.value = [];
+                exchangeRates.value = [];
+                currentDailyRate.value = null;
+            }
+            // --- FIN MODIFICACIÓN 1.2 ---
         } finally {
             accountingLoading.value = false;
             isLoadingData = false;
@@ -146,11 +151,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
     }
 
 
-    // --- Lógica de Obtención de Tasas (Refactorizada) ---
-
-    /**
-     * NUEVA FUNCIÓN: Obtiene las tasas de la API y las guarda en caché para evitar llamadas repetidas.
-     */
+    // --- Lógica de Obtención de Tasas (Sin cambios) ---
     async function getRatesFromApi() {
         if (apiRatesCache.value) {
             return apiRatesCache.value; // Devuelve desde caché si ya existe
@@ -178,9 +179,6 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         }
     }
 
-    /**
-     * REESCRITA: Usa la nueva función `getRatesFromApi` para obtener la tasa de hoy.
-     */
     async function fetchAndUpdateBCVRate() {
         const ratesList = await getRatesFromApi();
         if (ratesList.length > 0) {
@@ -204,9 +202,6 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         return false;
     }
 
-    /**
-     * REESCRITA: Usa la nueva función `getRatesFromApi` para buscar una tasa para una fecha específica.
-     */
     async function fetchRateForSpecificDateFromAPI(dateStringYYYYMMDD) {
         specificDateRateFetchingLoading.value = true;
         const ratesList = await getRatesFromApi();
@@ -255,6 +250,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         return foundRateData || null; // Devuelve el objeto completo o null
     }
 
+    // --- INICIO REFACTOR 1.3 ---
     async function updateDailyRate(rateValue, dateString = null) {
         const rate = Number(rateValue);
         if (isNaN(rate) || rate <= 0) {
@@ -290,6 +286,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             return true;
         }
 
+        // 1. Guardar estado original y ejecutar actualización optimista
         const existingIndex = exchangeRates.value.findIndex(r => r.id === resolvedTargetDateString);
         if (existingIndex !== -1) {
             exchangeRates.value.splice(existingIndex, 1, rateEntry);
@@ -300,31 +297,44 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         _updateCurrentDailyRate();
 
         if (user.value) {
+            // 2. "Disparar y Olvidar"
             const batch = writeBatch(db);
-            try {
-                const rateDocRef = doc(db, `users/${user.value.uid}/exchangeRates`, resolvedTargetDateString);
-                batch.set(rateDocRef, rateEntry);
+            const rateDocRef = doc(db, `users/${user.value.uid}/exchangeRates`, resolvedTargetDateString);
+            batch.set(rateDocRef, rateEntry);
 
-                await addEventHistoryEntry({
-                    eventType: originalRateEntry ? 'EXCHANGE_RATE_EDITED' : 'EXCHANGE_RATE_CREATED',
-                    entityType: 'Tasa de Cambio',
-                    entityId: resolvedTargetDateString,
-                    entityName: `Tasa del ${resolvedTargetDateString}`,
-                    changes: [{
-                        field: 'rate',
-                        oldValue: originalRateValue,
-                        newValue: rate,
-                        label: 'Tasa (Bs/USD)'
-                    }]
-                }, batch);
-
-                await batch.commit();
-                accountingError.value = null;
-                return true;
-            } catch (e) {
-                console.error("Error actualizando tasa en Firestore:", e);
-                accountingError.value = "Error al guardar la tasa de cambio en servidor.";
-                // Rollback
+            addEventHistoryEntry({
+                eventType: originalRateEntry ? 'EXCHANGE_RATE_EDITED' : 'EXCHANGE_RATE_CREATED',
+                entityType: 'Tasa de Cambio',
+                entityId: resolvedTargetDateString,
+                entityName: `Tasa del ${resolvedTargetDateString}`,
+                changes: [{
+                    field: 'rate',
+                    oldValue: originalRateValue,
+                    newValue: rate,
+                    label: 'Tasa (Bs/USD)'
+                }]
+            }, batch).then(() => {
+                batch.commit().then(() => {
+                    console.log(`Sincronización (updateDailyRate ${resolvedTargetDateString}) exitosa.`);
+                    accountingError.value = null; // Limpiar error en éxito
+                }).catch(e => {
+                    console.error("Error al sincronizar 'updateDailyRate' en Firestore:", e);
+                    accountingError.value = "Error al guardar la tasa de cambio en servidor.";
+                    // 3. Rollback
+                    if (originalRateEntry) {
+                        if (existingIndex !== -1) exchangeRates.value.splice(existingIndex, 1, originalRateEntry);
+                        else exchangeRates.value.unshift(originalRateEntry);
+                    } else {
+                        if (existingIndex !== -1) exchangeRates.value.splice(existingIndex, 1);
+                        else exchangeRates.value.shift();
+                    }
+                    exchangeRates.value.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    _updateCurrentDailyRate();
+                });
+            }).catch(e => {
+                console.error("Error al preparar historial para 'updateDailyRate':", e);
+                accountingError.value = "Error al preparar historial de tasa.";
+                // 3. Rollback (copiado de arriba)
                 if (originalRateEntry) {
                     if (existingIndex !== -1) exchangeRates.value.splice(existingIndex, 1, originalRateEntry);
                     else exchangeRates.value.unshift(originalRateEntry);
@@ -334,9 +344,13 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
                 }
                 exchangeRates.value.sort((a, b) => new Date(b.date) - new Date(a.date));
                 _updateCurrentDailyRate();
-                return false;
-            }
+            });
+
+            // 4. Retornar éxito inmediatamente
+            return true;
+
         } else {
+            // --- Lógica de LocalStorage (sin cambios) ---
             await addEventHistoryEntry({
                 eventType: originalRateEntry ? 'EXCHANGE_RATE_EDITED' : 'EXCHANGE_RATE_CREATED',
                 entityType: 'Tasa de Cambio',
@@ -387,42 +401,69 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         };
 
         if (user.value) {
+            // --- INICIO REFACTOR 1.3 ---
             const batch = writeBatch(db);
-            try {
-                const transColRef = collection(db, `users/${user.value.uid}/transactions`);
-                const newTransDocRef = doc(transColRef);
+            const transColRef = collection(db, `users/${user.value.uid}/transactions`);
+            const newTransDocRef = doc(transColRef);
+            const firestoreId = newTransDocRef.id;
+
+            // 1. Preparar datos locales optimistas
+            const savedTransaction = {
+                ...transactionEntry,
+                id: firestoreId,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            };
+
+            // 2. Ejecutar actualización optimista de UI PRIMERO
+            transactions.value.unshift(savedTransaction);
+            transactions.value.sort((a, b) => new Date(b.date) - new Date(a.date) || (new Date(b.createdAt || 0)) - (new Date(a.createdAt || 0)));
+
+            // 3. "Disparar y Olvidar"
+            const changes = getChangeDetails(null, transactionEntry, ['id', 'createdAt', 'updatedAt', 'userId']);
+            if (changes.length > 0) {
+                addEventHistoryEntry({
+                    eventType: 'TRANSACTION_CREATED',
+                    entityType: transactionEntry.type === 'income' ? 'Ingreso' : 'Egreso',
+                    entityId: firestoreId,
+                    entityName: transactionEntry.description,
+                    changes: changes
+                }, batch).then(() => {
+                    batch.set(newTransDocRef, { ...transactionEntry });
+
+                    batch.commit().then(() => {
+                        console.log(`Sincronización (addTransaction ${firestoreId}) exitosa.`);
+                        accountingError.value = null;
+                    }).catch(e => {
+                        console.error("Error al sincronizar 'addTransaction' a Firestore:", e);
+                        accountingError.value = e.message || "Error al guardar la transacción en servidor.";
+                        // 4. Rollback
+                        transactions.value = transactions.value.filter(t => t.id !== firestoreId);
+                    });
+                }).catch(e => {
+                    console.error("Error al preparar historial para 'addTransaction':", e);
+                    accountingError.value = "Error al preparar historial de transacción.";
+                    transactions.value = transactions.value.filter(t => t.id !== firestoreId); // Rollback
+                });
+            } else {
+                // Si no hay cambios (extraño para un 'add'), solo haz el commit
                 batch.set(newTransDocRef, { ...transactionEntry });
-
-                const changes = getChangeDetails(null, transactionEntry, ['id', 'createdAt', 'updatedAt', 'userId']);
-
-                if (changes.length > 0) {
-                    await addEventHistoryEntry({
-                        eventType: 'TRANSACTION_CREATED',
-                        entityType: transactionEntry.type === 'income' ? 'Ingreso' : 'Egreso',
-                        entityId: newTransDocRef.id,
-                        entityName: transactionEntry.description,
-                        changes: changes
-                    }, batch);
-                }
-                await batch.commit();
-
-                const savedTransaction = {
-                    ...transactionEntry,
-                    id: newTransDocRef.id,
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                };
-                transactions.value.unshift(savedTransaction);
-                transactions.value.sort((a, b) => new Date(b.date) - new Date(a.date) || (new Date(b.createdAt || 0)) - (new Date(a.createdAt || 0)));
-                _updateCurrentDailyRate();
-                accountingError.value = null;
-                return savedTransaction;
-            } catch (e) {
-                console.error("Error al añadir transacción a Firestore:", e);
-                accountingError.value = e.message || "Error al guardar la transacción en servidor.";
-                return null;
+                batch.commit().then(() => {
+                    console.log(`Sincronización (addTransaction ${firestoreId}) exitosa (sin historial).`);
+                    accountingError.value = null;
+                }).catch(e => {
+                    console.error("Error al sincronizar 'addTransaction' (sin hist) a Firestore:", e);
+                    accountingError.value = e.message || "Error al guardar la transacción en servidor.";
+                    transactions.value = transactions.value.filter(t => t.id !== firestoreId); // Rollback
+                });
             }
+
+            // 5. Retornar éxito inmediatamente
+            _updateCurrentDailyRate(); // <-- Esto es síncrono, está bien aquí
+            return savedTransaction;
+            // --- FIN REFACTOR 1.3 ---
         } else {
+            // --- Lógica de LocalStorage (sin cambios) ---
             const localId = `local_${Date.now()}`;
             const localEntry = { ...transactionEntry, id: localId };
             const changes = getChangeDetails(null, localEntry, ['id', 'createdAt', 'updatedAt', 'userId']);
@@ -449,6 +490,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         if (index === -1) {
             accountingError.value = "Error: Transacción no encontrada para actualizar."; return false;
         }
+        // 1. Guardar estado original y ejecutar actualización optimista
         const originalTransaction = JSON.parse(JSON.stringify(transactions.value[index]));
         const amountBs = Number(updatedEntryData.amountBs);
         if (isNaN(amountBs) || amountBs <= 0) {
@@ -467,34 +509,64 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             amountUsd: amountUsd,
             updatedAt: user.value ? serverTimestamp() : new Date().toISOString(),
         };
+
+        // 2. Ejecutar actualización optimista de UI PRIMERO
+        transactions.value.splice(index, 1, finalTransactionData);
+        transactions.value.sort((a, b) => new Date(b.date) - new Date(a.date));
+
         if (user.value) {
+            // --- INICIO REFACTOR 1.3 ---
             const batch = writeBatch(db);
-            try {
-                const transDocRef = doc(db, `users/${user.value.uid}/transactions`, updatedEntryData.id);
-                const { id, ...firestoreEntry } = finalTransactionData;
-                batch.set(transDocRef, firestoreEntry, { merge: true });
-                const changes = getChangeDetails(originalTransaction, firestoreEntry, ['id', 'createdAt', 'updatedAt', 'userId']);
-                if (changes.length > 0) {
-                    await addEventHistoryEntry({
-                        eventType: 'TRANSACTION_EDITED',
-                        entityType: finalTransactionData.type === 'income' ? 'Ingreso' : 'Egreso',
-                        entityId: updatedEntryData.id,
-                        entityName: finalTransactionData.description,
-                        changes: changes
-                    }, batch);
-                }
-                await batch.commit();
-                transactions.value.splice(index, 1, finalTransactionData);
-                transactions.value.sort((a, b) => new Date(b.date) - new Date(a.date));
-                _updateCurrentDailyRate();
-                accountingError.value = null;
-                return true;
-            } catch (e) {
-                console.error("Error al actualizar transacción en Firestore:", e);
-                accountingError.value = e.message || "Error al guardar cambios de transacción en servidor.";
-                return false;
+            const transDocRef = doc(db, `users/${user.value.uid}/transactions`, updatedEntryData.id);
+            const { id, ...firestoreEntry } = finalTransactionData;
+            batch.set(transDocRef, firestoreEntry, { merge: true });
+
+            // 3. "Disparar y Olvidar"
+            const changes = getChangeDetails(originalTransaction, firestoreEntry, ['id', 'createdAt', 'updatedAt', 'userId']);
+            if (changes.length > 0) {
+                addEventHistoryEntry({
+                    eventType: 'TRANSACTION_EDITED',
+                    entityType: finalTransactionData.type === 'income' ? 'Ingreso' : 'Egreso',
+                    entityId: updatedEntryData.id,
+                    entityName: finalTransactionData.description,
+                    changes: changes
+                }, batch).then(() => {
+                    batch.commit().then(() => {
+                        console.log(`Sincronización (saveTransaction ${updatedEntryData.id}) exitosa.`);
+                        accountingError.value = null;
+                    }).catch(e => {
+                        console.error("Error al sincronizar 'saveTransaction' en Firestore:", e);
+                        accountingError.value = e.message || "Error al guardar cambios de transacción en servidor.";
+                        // 4. Rollback
+                        transactions.value.splice(index, 1, originalTransaction);
+                        transactions.value.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    });
+                }).catch(e => {
+                    console.error("Error al preparar historial para 'saveTransaction':", e);
+                    accountingError.value = "Error al preparar historial de guardado.";
+                    transactions.value.splice(index, 1, originalTransaction); // Rollback
+                    transactions.value.sort((a, b) => new Date(b.date) - new Date(a.date));
+                });
+            } else {
+                console.log("saveTransaction: No hay cambios detectados para sincronizar.");
+                // Aunque no haya cambios en el historial, el campo 'updatedAt' sí cambió, así que hacemos commit
+                batch.commit().then(() => {
+                    console.log(`Sincronización (saveTransaction ${updatedEntryData.id}) exitosa (solo timestamp).`);
+                    accountingError.value = null;
+                }).catch(e => {
+                    console.error("Error al sincronizar 'saveTransaction' (solo timestamp) en Firestore:", e);
+                    accountingError.value = e.message || "Error al guardar cambios de transacción en servidor.";
+                    transactions.value.splice(index, 1, originalTransaction); // Rollback
+                    transactions.value.sort((a, b) => new Date(b.date) - new Date(a.date));
+                });
             }
+
+            // 5. Retornar éxito inmediatamente
+            _updateCurrentDailyRate();
+            return true;
+            // --- FIN REFACTOR 1.3 ---
         } else {
+            // --- Lógica de LocalStorage (sin cambios) ---
             const changes = getChangeDetails(originalTransaction, finalTransactionData, ['id', 'createdAt', 'updatedAt', 'userId']);
             if (changes.length > 0) {
                 await addEventHistoryEntry({
@@ -519,31 +591,49 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         if (index === -1) {
             accountingError.value = "Error: Transacción no encontrada para eliminar."; return false;
         }
+        // 1. Guardar estado original y ejecutar actualización optimista
         const transactionToDelete = JSON.parse(JSON.stringify(transactions.value[index]));
+        transactions.value.splice(index, 1);
+        _updateCurrentDailyRate(); // Actualizar UI optimista
+
         if (user.value) {
+            // --- INICIO REFACTOR 1.3 ---
             const batch = writeBatch(db);
-            try {
-                const transDocRef = doc(db, `users/${user.value.uid}/transactions`, transactionId);
-                batch.delete(transDocRef);
-                await addEventHistoryEntry({
-                    eventType: 'TRANSACTION_DELETED',
-                    entityType: transactionToDelete.type === 'income' ? 'Ingreso' : 'Egreso',
-                    entityId: transactionId,
-                    entityName: transactionToDelete.description,
-                    changes: Object.keys(transactionToDelete).filter(k => !['id', 'createdAt', 'updatedAt', 'userId'].includes(k)).map(key => ({
-                        field: key, oldValue: transactionToDelete[key], newValue: null, label: getFieldLabel(key)
-                    }))
-                }, batch);
-                await batch.commit();
-                transactions.value.splice(index, 1);
+            const transDocRef = doc(db, `users/${user.value.uid}/transactions`, transactionId);
+            batch.delete(transDocRef);
+
+            // 2. "Disparar y Olvidar"
+            addEventHistoryEntry({
+                eventType: 'TRANSACTION_DELETED',
+                entityType: transactionToDelete.type === 'income' ? 'Ingreso' : 'Egreso',
+                entityId: transactionId,
+                entityName: transactionToDelete.description,
+                changes: Object.keys(transactionToDelete).filter(k => !['id', 'createdAt', 'updatedAt', 'userId'].includes(k)).map(key => ({
+                    field: key, oldValue: transactionToDelete[key], newValue: null, label: getFieldLabel(key)
+                }))
+            }, batch).then(() => {
+                batch.commit().then(() => {
+                    console.log(`Sincronización (deleteTransaction ${transactionId}) exitosa.`);
+                    accountingError.value = null;
+                }).catch(e => {
+                    console.error("Error al sincronizar 'deleteTransaction' en Firestore:", e);
+                    accountingError.value = "Error al eliminar la transacción.";
+                    // 3. Rollback
+                    transactions.value.splice(index, 0, transactionToDelete);
+                    _updateCurrentDailyRate();
+                });
+            }).catch(e => {
+                console.error("Error al preparar historial para 'deleteTransaction':", e);
+                accountingError.value = "Error al preparar historial de borrado.";
+                transactions.value.splice(index, 0, transactionToDelete); // Rollback
                 _updateCurrentDailyRate();
-                accountingError.value = null;
-                return true;
-            } catch (e) {
-                console.error("Error al eliminar transacción de Firestore:", e);
-                accountingError.value = "Error al eliminar la transacción."; return false;
-            }
+            });
+
+            // 4. Retornar éxito inmediatamente
+            return true;
+            // --- FIN REFACTOR 1.3 ---
         } else {
+            // --- Lógica de LocalStorage (sin cambios) ---
             await addEventHistoryEntry({
                 eventType: 'TRANSACTION_DELETED',
                 entityType: transactionToDelete.type === 'income' ? 'Ingreso' : 'Egreso',
@@ -553,14 +643,14 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
                     field: key, oldValue: transactionToDelete[key], newValue: null, label: getFieldLabel(key)
                 }))
             });
-            transactions.value.splice(index, 1);
-            _updateCurrentDailyRate();
-            accountingError.value = null;
+            // La actualización optimista ya se hizo
             return true;
         }
     }
+    // --- FIN REFACTOR 1.3 ---
 
     function getFilteredTransactions(options = {}) {
+        // ... (código existente, sin cambios)
         const { startDate, endDate, type, category } = options;
         return transactions.value.filter(tx => {
             let keep = true;
@@ -581,6 +671,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
     }
 
     function calculateSummary(filteredList) {
+        // ... (código existente, sin cambios)
         const summary = filteredList.reduce((acc, tx) => {
             if (tx.type === 'income') {
                 acc.totalIncome += tx.amountBs || 0;
@@ -598,6 +689,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
     watch(
         () => ({ user: user.value, authIsLoading: authLoading.value }),
         (newState, oldState) => {
+            // ... (código existente, sin cambios)
             const newUserId = newState.user ? newState.user.uid : null;
             if (newState.authIsLoading) {
                 if (dataLoadedForContext.value !== null) {
@@ -655,4 +747,3 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         fetchRateForSpecificDateFromAPI,
     };
 });
-

@@ -1,24 +1,17 @@
 // src/main.js
 import { createApp } from 'vue'
 import App from './App.vue'
-import { createPinia } from 'pinia' // <-- AÑADE ESTA LÍNEA
-import './assets/style.css' // Importa el CSS con Tailwind
+import { createPinia } from 'pinia'
+import './assets/style.css'
 import router from './router'
 import Toast, { POSITION } from "vue-toastification";
 import "vue-toastification/dist/index.css";
-
-// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-// Add other Firebase imports as needed, e.g., getAuth, getFirestore
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache } from "firebase/firestore";
 
-// Import the setupAuthListener function
 import { setupAuthListener } from './composables/useAuth';
 
-
-// Your web app's Firebase configuration
-// Replace with your actual config object from Firebase console
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -29,33 +22,39 @@ const firebaseConfig = {
     measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-// Initialize Firebase
 const firebaseApp = initializeApp(firebaseConfig);
-
-// Get Firebase services instances
 const auth = getAuth(firebaseApp);
-const db = getFirestore(firebaseApp);
 
-// Export the auth and db instances so they can be used in other files
+let db;
+try {
+    // Intenta inicializar Firestore con persistencia local habilitada
+    db = initializeFirestore(firebaseApp, {
+        localCache: persistentLocalCache(/*{ sizeBytes: 104857600 } Límite opcional de 100MB */)
+    });
+    console.log("Persistencia offline de Firestore HABILITADA.");
+} catch (error) {
+    console.error("Error al habilitar la persistencia offline de Firestore:", error);
+    // Fallback a la inicialización normal (solo caché en memoria) si la persistencia falla
+    db = initializeFirestore(firebaseApp, {});
+    console.log("Persistencia offline FALLÓ. Usando caché en memoria.");
+}
+
+
 export { auth, db };
 
 
 const options = {
-    position: POSITION.TOP_RIGHT, // Where the toasts appear
-    timeout: 2000, // How long they last (in ms)
-    // You can add many other options here
+    position: POSITION.TOP_RIGHT,
+    timeout: 2000,
 };
 
 const app = createApp(App)
-const pinia = createPinia() // <-- AÑADE ESTA LÍNEA
+const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 app.use(Toast, options);
 
 app.mount('#app');
-
-// AFTER mounting the app, setup the auth listener
-// Pass the initialized auth instance
 setupAuthListener(auth);
 
 // Optional: Clean up the listener when the app instance unmounts
