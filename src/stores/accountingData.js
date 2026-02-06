@@ -152,51 +152,79 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
 
 
     // --- Lógica de Obtención de Tasas (Sin cambios) ---
-    async function getRatesFromApi() {
-        if (apiRatesCache.value) {
-            return apiRatesCache.value; // Devuelve desde caché si ya existe
+    async function getRatesFromApi(specificDate = null) {
+        const now = new Date();
+        const dateToFetch = specificDate || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+        // 1. VERIFICAR SI YA EXISTE EN LA BASE DE DATOS (FIREBASE)
+        // Usamos la función que ya tienes para buscar en el estado local/sincronizado
+        const existingRate = getRateForExactDate(dateToFetch);
+
+        if (existingRate) {
+            console.log(`[Caché] Tasa encontrada en base de datos para ${dateToFetch}: ${existingRate}`);
+            return [{ usd: existingRate, date: dateToFetch, source: 'Firebase' }];
         }
+
+        // 2. SI NO EXISTE, CONSULTAR A LA EDGE FUNCTION
         rateFetchingLoading.value = true;
         accountingError.value = null;
+
         try {
+            console.log(`[API] Consultando Edge Function para fecha: ${dateToFetch}...`);
             const apiUrl = import.meta.env.VITE_DOLARVENEZUELA_API_URL;
-            const response = await fetch(apiUrl);
+            const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${anonKey}`
+                },
+                body: JSON.stringify({ date: dateToFetch })
+            });
+
             if (!response.ok) {
-                throw new Error('La API de DolarVzla no respondió correctamente.');
+                throw new Error(`Error ${response.status}: Fallo en la comunicación con el servidor.`);
             }
+
             const data = await response.json();
-            if (!data || !data.rates || !Array.isArray(data.rates)) {
-                throw new Error('La respuesta de la API no tiene el formato esperado.');
+
+            if (data && data.rate) {
+                const rateValue = parseFloat(data.rate);
+
+                // 3. GUARDAR AUTOMÁTICAMENTE EN FIREBASE PARA FUTURAS CONSULTAS
+                // Usamos updateDailyRate que ya maneja la lógica de guardado y historial
+                console.log(`[Registro] Guardando nueva tasa en base de datos: ${rateValue} para ${dateToFetch}`);
+                await updateDailyRate(rateValue, dateToFetch);
+
+                return [{
+                    usd: rateValue,
+                    date: dateToFetch,
+                    source: data.source || 'BCV'
+                }];
+            } else {
+                throw new Error('La API no devolvió una tasa válida.');
             }
-            apiRatesCache.value = data.rates; // Guardar en caché
-            return data.rates;
         } catch (error) {
-            console.error("Error fetching from DolarVzla API:", error);
-            accountingError.value = "No se pudo obtener la lista de tasas de cambio.";
-            return []; // Devuelve un array vacío en caso de error
+            console.error("Error en el flujo de tasa de cambio:", error);
+            accountingError.value = "No se pudo obtener ni guardar la tasa de cambio.";
+            return [];
         } finally {
             rateFetchingLoading.value = false;
         }
     }
 
     async function fetchAndUpdateBCVRate() {
+        // Ahora getRatesFromApi ya busca la tasa de "hoy" por defecto
         const ratesList = await getRatesFromApi();
+
         if (ratesList.length > 0) {
-            // La API devuelve la lista ordenada, la primera es la más reciente.
             const latestRateData = ratesList[0];
             const rateValue = latestRateData.usd;
-            const rateDate = latestRateData.date; // Formato YYYY-MM-DD
+            const rateDate = latestRateData.date;
 
-            const now = new Date();
-            const localTodayString = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-            // Actualizamos la tasa para la fecha de "hoy" con el valor más reciente obtenido.
-            const success = await updateDailyRate(rateValue, localTodayString);
-
-            // Opcional pero recomendado: guardamos la tasa en su fecha original si es diferente.
-            if (success && localTodayString !== rateDate) {
-                await updateDailyRate(rateValue, rateDate);
-            }
+            // Actualizamos la base de datos de Firebase con la nueva tasa
+            const success = await updateDailyRate(rateValue, rateDate);
             return success;
         }
         return false;
@@ -204,19 +232,23 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
 
     async function fetchRateForSpecificDateFromAPI(dateStringYYYYMMDD) {
         specificDateRateFetchingLoading.value = true;
-        const ratesList = await getRatesFromApi();
+
+        // Esta llamada ahora internamente verifica si existe en BD antes de ir a la API
+        const ratesList = await getRatesFromApi(dateStringYYYYMMDD);
+
         specificDateRateFetchingLoading.value = false;
 
         if (ratesList.length > 0) {
-            // Buscar la tasa para la fecha exacta o la más cercana anterior
-            const rateData = ratesList.find(rate => rate.date <= dateStringYYYYMMDD);
-            if (rateData) {
-                specificDateRateError.value = null;
-                return { rate: rateData.usd, dateFound: rateData.date, error: null };
-            }
+            const rateData = ratesList[0];
+            specificDateRateError.value = null;
+            return {
+                rate: rateData.usd,
+                dateFound: rateData.date,
+                error: null
+            };
         }
 
-        specificDateRateError.value = `No se encontró tasa para la fecha ${dateStringYYYYMMDD} o anterior.`;
+        specificDateRateError.value = `No se pudo obtener tasa para la fecha ${dateStringYYYYMMDD}.`;
         return { rate: null, dateFound: null, error: specificDateRateError.value };
     }
 
