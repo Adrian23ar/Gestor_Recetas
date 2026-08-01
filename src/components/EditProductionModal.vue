@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, computed } from 'vue';
+import DateField from './ui/DateField.vue';
 
 const props = defineProps({
     show: {
@@ -15,7 +16,6 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'save']);
 
-// --- Estado Local del Modal ---
 const editableRecord = ref(null);
 
 watch(() => props.record, (newRecord) => {
@@ -24,14 +24,14 @@ watch(() => props.record, (newRecord) => {
         editableRecord.value.batchSize = Number(editableRecord.value.batchSize) || 0;
         editableRecord.value.netProfit = Number(editableRecord.value.netProfit) || 0;
         editableRecord.value.date = editableRecord.value.date || '';
-        // Asegurar que isSold exista, por defecto false si no viene en el registro
         editableRecord.value.isSold = typeof editableRecord.value.isSold === 'boolean' ? editableRecord.value.isSold : false;
     } else {
         editableRecord.value = null;
     }
 }, { immediate: true });
 
-// --- NUEVO: Computed para formatear Ganancia Neta ---
+// Invariante: input type="text" inputmode="decimal" — un type="number" rompe el
+// formateo a 2 decimales y el manejo del campo vacío.
 const formattedNetProfit = computed({
     get() {
         const num = Number(editableRecord.value?.netProfit);
@@ -44,103 +44,92 @@ const formattedNetProfit = computed({
         }
     }
 });
-// --- Fin Computed ---
 
-// --- Funciones del Modal ---
+const errors = computed(() => {
+    const e = {};
+    if (!editableRecord.value) return e;
+    if (!editableRecord.value.productName || !editableRecord.value.productName.trim()) e.productName = 'Obligatorio.';
+    if (editableRecord.value.batchSize === null || isNaN(editableRecord.value.batchSize) || editableRecord.value.batchSize <= 0) {
+        e.batchSize = 'Debe ser mayor a cero.';
+    }
+    if (!editableRecord.value.date) e.date = 'Obligatoria.';
+    if (editableRecord.value.netProfit === null || isNaN(editableRecord.value.netProfit)) e.netProfit = 'Número inválido.';
+    return e;
+});
+const isValid = computed(() => Object.keys(errors.value).length === 0);
+
 function closeModal() {
     emit('close');
 }
 
 function saveChanges() {
-    if (!editableRecord.value) {
-        console.error("EditProductionModal: No hay registro editable.");
-        return;
-    }
-    // Se mantiene la validación original, isSold no es obligatorio para guardar
-    if (!editableRecord.value.productName || editableRecord.value.batchSize === null || !editableRecord.value.date || editableRecord.value.netProfit === null || isNaN(editableRecord.value.netProfit)) {
-        alert('Por favor, completa todos los campos antes de guardar.');
-        return;
-    }
-    if (editableRecord.value.batchSize <= 0) {
-        alert('El lote debe ser mayor a cero.');
-        return;
-    }
-    if (editableRecord.value.netProfit === null || isNaN(editableRecord.value.netProfit)) {
-        alert('La ganancia neta debe ser un número válido.');
-        return;
-    }
-
-    emit('save', { ...editableRecord.value }); // editableRecord.value ya incluye isSold
+    if (!editableRecord.value || !isValid.value) return;
+    emit('save', { ...editableRecord.value });
 }
 </script>
 
 <template>
     <Transition name="modal-transition">
-        <div v-if="show && editableRecord" @click.self="closeModal"
-            class="fixed inset-0 bg-black/60 overflow-y-auto h-full w-full z-50 flex justify-center items-start pt-10">
-
-            <div class="modal-content relative mx-auto p-6 border border-neutral-300 w-full max-w-md shadow-lg rounded-md bg-contrast
-            dark:border-dark-neutral-700 dark:bg-dark-contrast dark:shadow-xl">
-                <div class="flex justify-between items-center border-b border-neutral-200 pb-3 mb-4
-              dark:border-dark-neutral-700">
-                    <h3 class="text-xl font-semibold text-primary-800
-               dark:text-dark-primary-200">Editar Registro: {{ editableRecord?.productName || '' }}
-                    </h3>
-                    <button @click="closeModal" class="text-neutral-400 hover:text-neutral-600 text-2xl font-bold
-               dark:text-dark-neutral-400 dark:hover:text-dark-neutral-600">&times;</button>
+        <div v-if="show && editableRecord" class="ui-backdrop flex items-center justify-center p-4" @click.self="closeModal">
+            <div class="ui-modal-box modal-content max-w-md">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="min-w-0">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-stone-400">Producción</p>
+                        <h3 class="mt-0.5 truncate text-[19px] font-semibold tracking-[-0.01em] text-stone-800 dark:text-stone-100">
+                            {{ editableRecord.productName }}
+                        </h3>
+                    </div>
+                    <button type="button" @click="closeModal" aria-label="Cerrar"
+                        class="flex h-[34px] w-[34px] shrink-0 cursor-pointer items-center justify-center rounded-control text-2xl leading-none text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-300">
+                        &times;
+                    </button>
                 </div>
 
-                <form @submit.prevent="saveChanges" class="space-y-4">
+                <form class="mt-5 space-y-4" @submit.prevent="saveChanges">
                     <div>
-                        <label for="edit-product-name" class="block text-sm font-medium text-text-base
-                              dark:text-dark-text-base">Producción (Nombre
-                            del producto):</label>
-                        <input type="text" id="edit-product-name" v-model="editableRecord.productName" required class="mt-1 block w-full px-3 py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm
-                 dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base
-                 dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400" />
-                    </div>
-                    <div>
-                        <label for="edit-batch-size" class="block text-sm font-medium text-text-base
-                              dark:text-dark-text-base">Lote (Cantidad):</label>
-                        <input type="number" id="edit-batch-size" v-model.number="editableRecord.batchSize" required
-                            min="1" step="1" class="mt-1 block w-full px-3 py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm
-                 dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base
-                 dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400" />
-                    </div>
-                    <div>
-                        <label for="edit-production-date" class="block text-sm font-medium text-text-base
-                          dark:text-dark-text-base">Fecha:</label>
-                        <input type="date" id="edit-production-date" v-model="editableRecord.date" required class="mt-1 block w-full px-3 py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-contrast
-               dark:border-dark-neutral-700 dark:bg-dark-contrast dark:text-dark-text-base
-               dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400" />
-                    </div>
-                    <div>
-                        <label for="edit-net-profit"
-                            class="block text-sm font-medium text-text-base dark:text-dark-text-base">Ganancia Neta
-                            ($):</label>
-                        <input type="text" inputmode="decimal" id="edit-net-profit" v-model="formattedNetProfit"
-                            required placeholder="0.00"
-                            class="mt-1 block w-full px-3 py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400" />
+                        <label class="ui-label" for="edit-product-name">Producción</label>
+                        <input id="edit-product-name" v-model="editableRecord.productName" type="text"
+                            :class="['ui-input', errors.productName && 'ui-input-error']" />
+                        <p v-if="errors.productName" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.productName }}</p>
                     </div>
 
-                    <div class="flex items-center">
-                        <input type="checkbox" id="edit-is-sold" v-model="editableRecord.isSold"
-                            class="h-4 w-4 text-accent-600 border-neutral-300 rounded focus:ring-accent-500
-                 dark:border-dark-neutral-600 dark:bg-dark-neutral-700 dark:focus:ring-dark-accent-500 dark:checked:bg-dark-accent-500" />
-                        <label for="edit-is-sold" class="ml-2 block text-sm text-text-base dark:text-dark-text-base">
-                            Lote Vendido
-                        </label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="ui-label" for="edit-batch-size">Lote (cantidad)</label>
+                            <input id="edit-batch-size" v-model.number="editableRecord.batchSize" type="number" min="1" step="1"
+                                :class="['ui-input', errors.batchSize && 'ui-input-error']" />
+                            <p v-if="errors.batchSize" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.batchSize }}</p>
+                        </div>
+                        <div>
+                            <label class="ui-label" for="edit-production-date">Fecha</label>
+                            <DateField id="edit-production-date" v-model="editableRecord.date" :error="!!errors.date" />
+                            <p v-if="errors.date" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.date }}</p>
+                        </div>
                     </div>
-                    <div class="flex justify-end pt-4 border-t border-neutral-200 mt-4 space-x-3
-                dark:border-dark-neutral-700">
-                        <button type="button" @click="closeModal" class="px-4 py-2 cursor-pointer bg-neutral-300 text-text-base transition-all rounded-md hover:bg-neutral-400
-                 dark:bg-dark-neutral-700 dark:text-dark-text-base dark:hover:bg-dark-neutral-600">
-                            Cancelar
-                        </button>
-                        <button type="submit"
-                            class="px-4 py-2 cursor-pointer bg-accent-500 text-white font-semibold transition-all rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500
-                 dark:bg-dark-accent-400 dark:text-dark-text-base dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400 dark:focus:ring-offset-dark-contrast">
-                            Guardar Cambios
+
+                    <div>
+                        <label class="ui-label" for="edit-net-profit">Ganancia neta ($)</label>
+                        <input id="edit-net-profit" v-model="formattedNetProfit" type="text" inputmode="decimal" placeholder="0.00"
+                            :class="['ui-input', errors.netProfit && 'ui-input-error']" />
+                        <p v-if="errors.netProfit" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.netProfit }}</p>
+                    </div>
+
+                    <div>
+                        <label class="ui-label">Estado</label>
+                        <div class="ui-seg-track w-fit">
+                            <button type="button" :class="editableRecord.isSold ? 'ui-seg-active' : 'ui-seg'" @click="editableRecord.isSold = true">
+                                Vendido
+                            </button>
+                            <button type="button" :class="!editableRecord.isSold ? 'ui-seg-active' : 'ui-seg'" @click="editableRecord.isSold = false">
+                                Pendiente
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="mt-2 flex items-center justify-between gap-3">
+                        <button type="button" @click="closeModal" class="ui-btn-outline">Cancelar</button>
+                        <button type="submit" :disabled="!isValid" :class="!isValid ? 'ui-btn-disabled' : 'ui-btn-primary'">
+                            Guardar cambios
                         </button>
                     </div>
                 </form>

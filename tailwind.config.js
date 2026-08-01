@@ -17,8 +17,9 @@ export default {
       // --- NUESTRA PALETA CÁLIDA Y ACOGEDORA (incluyendo modo oscuro) ---
       colors: {
         // Colores del Tema Claro (ya definidos)
-        background: colors.stone['50'],      // Fondo general muy claro (#fafaf9)
+        background: colors.stone['100'],     // Fondo general de página (#f5f5f4)
         contrast: colors.white,              // Fondo para elementos como tarjetas/modales (#ffffff)
+        'surface-muted': colors.stone['50'], // Superficie interior / cabecera de tabla (#fafaf9)
         primary: colors.stone,               // Usar como primary-700, primary-800 etc. (Claro)
         secondary: colors.amber,             // Usar como secondary-700, secondary-600 etc. (Claro)
         accent: colors.rose,                 // Usar como accent-500, accent-400 etc. (Claro)
@@ -50,9 +51,51 @@ export default {
         success: colors.emerald, // Usar como success-600 (Claro) / success-400 (Oscuro)
         warning: colors.amber,   // Usar como warning-500 (Claro) / warning-400 (Oscuro)
       },
-      // --- NUESTRA TIPOGRAFÍA (Mantener Inter para ambos modos) ---
+      // --- NUESTRA TIPOGRAFÍA ---
       fontFamily: {
-        sans: ['Inter', ...defaultTheme.fontFamily.sans],
+        sans: ['Nunito', ...defaultTheme.fontFamily.sans],
+      },
+      // --- FORMA, SOMBRA Y MOVIMIENTO (rediseño) ---
+      borderRadius: {
+        card: '24px',
+        tile: '22px',
+        panel: '20px',
+        nav: '18px',
+        box: '16px',
+        field: '14px',
+        control: '12px',
+        chip: '11px',
+      },
+      boxShadow: {
+        card: '0 1px 2px rgba(41,37,36,.04)',
+        raised: '0 1px 2px rgba(41,37,36,.04), 0 8px 24px -18px rgba(41,37,36,.5)',
+        lift: '0 2px 4px rgba(41,37,36,.05), 0 18px 34px -20px rgba(41,37,36,.55)',
+        cta: '0 6px 16px -8px rgba(225,29,72,.7)',
+        modal: '0 30px 60px -20px rgba(28,25,23,.5)',
+        drawer: '-24px 0 60px -30px rgba(28,25,23,.6)',
+        toast: '0 20px 40px -18px rgba(28,25,23,.7)',
+        navbar: '0 18px 40px -18px rgba(28,25,23,.75)',
+        pill: '0 1px 2px rgba(41,37,36,.08)',
+      },
+      keyframes: {
+        shimmer: {
+          '0%': { opacity: '.55' },
+          '50%': { opacity: '1' },
+          '100%': { opacity: '.55' },
+        },
+        riseIn: {
+          from: { opacity: '0', transform: 'translateY(8px)' },
+          to: { opacity: '1', transform: 'none' },
+        },
+        slideIn: {
+          from: { opacity: '.4', transform: 'translateX(24px)' },
+          to: { opacity: '1', transform: 'none' },
+        },
+      },
+      animation: {
+        shimmer: 'shimmer 1.4s ease-in-out infinite',
+        riseIn: 'riseIn .2s ease-out',
+        slideIn: 'slideIn .22s ease-out',
       },
     },
   },

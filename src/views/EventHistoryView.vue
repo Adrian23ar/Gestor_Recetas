@@ -1,144 +1,146 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue';
+import { ref, onUnmounted, computed, watch } from 'vue';
 import { useAuth } from '../composables/useAuth';
 import { db } from '../main';
-import { collection, getDocs, query, orderBy, limit, startAfter, onSnapshot } from 'firebase/firestore';
-// import { useEventHistory } from '../composables/useEventHistory'; // Aún no lo usamos para leer, pero podría ser útil
-import EventDetailsModal from '../components/EventDetailsModal.vue'; // Ajusta la ruta
+import { collection, getDocs, query, orderBy, limit, startAfter } from 'firebase/firestore';
+import EventDetailsModal from '../components/EventDetailsModal.vue';
+import ErrorMessage from '../components/ErrorMessage.vue';
+import { getEventMeta } from '../utils/eventLabels.js';
 
-// Importa DataTables y su CSS si no está global
-import DataTable from 'datatables.net-vue3';
-import DataTablesCore from 'datatables.net-dt';
-import 'datatables.net-responsive-dt';
-
-DataTable.use(DataTablesCore);
-DataTable.use(DataTablesCore.Responsive);
-
-const { user, authLoading } = useAuth();
-const localHistoryEntries = ref([]); // Para entradas de localStorage o snapshot de Firestore
+const { user } = useAuth();
+const localHistoryEntries = ref([]);
 const historyLoading = ref(true);
 const historyError = ref(null);
 const isDetailsModalVisible = ref(false);
 const selectedEventEntry = ref(null);
-const historyTableRef = ref(null); // Referencia para el elemento de la tabla
-let dtInstance = null; // Instancia de DataTables
-let unsubscribeSnapshot = null;
-const PAGE_SIZE = 100; // Cuántos cargar a la vez
+const PAGE_SIZE = 100;
 const lastVisibleDoc = ref(null);
 const allDataLoaded = ref(false);
+const searchQuery = ref('');
 
-let initialLoadTriggered = false; // Bandera para evitar doble carga por watcher inmediato
-// --- Funciones para el Modal de Detalles ---
+let isCurrentlyLoading = false;
+
 const showDetails = (eventEntry) => {
     selectedEventEntry.value = eventEntry;
     isDetailsModalVisible.value = true;
 };
-
 const closeDetailsModal = () => {
     isDetailsModalVisible.value = false;
     selectedEventEntry.value = null;
 };
 
-// --- Formateo y Mapeo de Datos para la Tabla ---
-const formatTimestamp = (timestamp) => {
-    if (!timestamp) return 'Fecha desconocida';
-    // Si es un timestamp de Firestore
-    if (timestamp && typeof timestamp.toDate === 'function') {
-        return timestamp.toDate().toLocaleString();
-    }
-    // Si es un string ISO (de localStorage)
-    if (typeof timestamp === 'string') {
-        return new Date(timestamp).toLocaleString();
-    }
-    return 'Fecha inválida';
-};
+function toDate(timestamp) {
+    if (!timestamp) return null;
+    if (typeof timestamp.toDate === 'function') return timestamp.toDate();
+    if (typeof timestamp === 'string') return new Date(timestamp);
+    if (typeof timestamp === 'number') return new Date(timestamp);
+    return null;
+}
 
-const getEventTypeLabel = (eventType) => {
-    const labels = {
-        RECIPE_CREATED: 'Nueva Receta',
-        RECIPE_EDITED: 'Receta Editada',
-        RECIPE_DELETED: 'Receta Eliminada',
-        INGREDIENT_CREATED: 'Nuevo Ingrediente',
-        INGREDIENT_EDITED: 'Ingrediente Editado',
-        INGREDIENT_DELETED: 'Ingrediente Eliminado',
-        PRODUCTION_RECORD_CREATED: 'Nuevo Registro de Producción',
-        PRODUCTION_RECORD_EDITED: 'Registro de Producción Editado',
-        PRODUCTION_RECORD_DELETED: 'Registro de Producción Eliminado',
-        STOCK_MANUAL_EDIT: 'Stock Editado Manualmente',
-        STOCK_ADJUST_BY_PRODUCTION_ADD: 'Stock Descontado por Producción',
-        STOCK_ADJUST_BY_PRODUCTION_DELETE: 'Stock Restaurado (Prod. Eliminada)',
-        STOCK_ADJUST_BY_PRODUCTION_EDIT: 'Stock Ajustado por Edición de Prod.',
-        TRANSACTION_CREATED: 'Transacción Creada',
-        TRANSACTION_EDITED: 'Transacción Editada',
-        TRANSACTION_DELETED: 'Transacción Eliminada',
-        EXCHANGE_RATE_UPDATED: 'Tasa de Cambio Actualizada',
-        EXCHANGE_RATE_CREATED: 'Tasa de Cambio Creada',
-        EXCHANGE_RATE_EDITED: 'Tasa de Cambio Editada',
-        // Añade más según tus eventType
-    };
-    return labels[eventType] || eventType;
-};
+function formatTime(timestamp) {
+    const date = toDate(timestamp);
+    if (!date) return '--:--';
+    return date.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
 
-const formattedHistoryEntries = computed(() => {
-    return localHistoryEntries.value.map(entry => ({
-        ...entry,
-        // Campos para DataTables (deben coincidir con `columns.data` y `columns.render`)
-        displayTimestamp: formatTimestamp(entry.timestamp),
-        displayEntity: `${entry.entityType}: ${entry.entityName || (entry.entityId ? `ID ${entry.entityId}` : 'N/A')}`,
-        displayEventType: getEventTypeLabel(entry.eventType),
-        // 'originalEntry' permite pasar el objeto completo al render de acciones si es necesario
-        originalEntry: entry
-    }));
+const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+function isSameDay(a, b) {
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function getDateGroupLabel(date) {
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const dayMonth = `${date.getDate()} de ${MONTHS[date.getMonth()]}`;
+    if (isSameDay(date, now)) return `Hoy · ${dayMonth}`;
+    if (isSameDay(date, yesterday)) return `Ayer · ${dayMonth}`;
+    return dayMonth;
+}
+
+function summarizeValue(value) {
+    if (value === null || value === undefined) return '—';
+    if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+    if (typeof value === 'object') return Array.isArray(value) ? `(${value.length})` : '(objeto)';
+    if (typeof value === 'number') return value.toLocaleString('es-VE', { maximumFractionDigits: 2 });
+    return String(value);
+}
+
+function buildDescription(entry) {
+    const entityPart = entry.entityName || entry.entityType || '';
+    if (Array.isArray(entry.changes) && entry.changes.length > 0) {
+        const first = entry.changes[0];
+        const label = first.label || first.field;
+        const summary = `${label} ${summarizeValue(first.oldValue)} → ${summarizeValue(first.newValue)}`;
+        return entityPart ? `${entityPart} — ${summary}` : summary;
+    }
+    return entry.description || entityPart || 'Sin detalles adicionales.';
+}
+
+function badgeClass(eventType) {
+    const tone = getEventMeta(eventType).tone;
+    if (tone === 'success') return 'ui-badge-success';
+    if (tone === 'warning') return 'ui-badge-warning';
+    if (tone === 'danger') return 'ui-badge-danger';
+    return 'ui-badge-neutral';
+}
+
+const filteredEntries = computed(() => {
+    const q = searchQuery.value.trim().toLowerCase();
+    if (!q) return localHistoryEntries.value;
+    return localHistoryEntries.value.filter(entry =>
+        buildDescription(entry).toLowerCase().includes(q) ||
+        getEventMeta(entry.eventType).label.toLowerCase().includes(q) ||
+        (entry.entityName || '').toLowerCase().includes(q)
+    );
 });
 
+const groupedHistory = computed(() => {
+    const groups = [];
+    let currentKey = null;
+    let currentGroup = null;
+    for (const entry of filteredEntries.value) {
+        const date = toDate(entry.timestamp);
+        const key = date ? `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}` : 'unknown';
+        if (key !== currentKey) {
+            currentKey = key;
+            currentGroup = { label: date ? getDateGroupLabel(date) : 'Fecha desconocida', entries: [] };
+            groups.push(currentGroup);
+        }
+        currentGroup.entries.push(entry);
+    }
+    return groups;
+});
 
-
-let isCurrentlyLoading = false; // Bandera anti-concurrencia
-
-// --- Lógica de Carga ---
+// --- Carga (conservada): paginación por cursor de Firestore + fallback a localStorage ---
 async function loadHistory(isLoadMore = false) {
-    // Guarda anti-concurrencia
-    if (isCurrentlyLoading) {
-        console.log("loadHistory: Carga ya en progreso, omitiendo.");
-        return;
-    }
-    if (isLoadMore && allDataLoaded.value) {
-        console.log("loadHistory: No más datos para cargar.");
-        return;
-    }
+    if (isCurrentlyLoading) return;
+    if (isLoadMore && allDataLoaded.value) return;
 
-    isCurrentlyLoading = true; // Marcar como ocupado
+    isCurrentlyLoading = true;
     historyLoading.value = true;
     historyError.value = null;
 
     if (!isLoadMore) {
-        console.log("loadHistory: Iniciando carga completa / reseteo.");
         localHistoryEntries.value = [];
         lastVisibleDoc.value = null;
         allDataLoaded.value = false;
-        if (dtInstance) {
-            dtInstance.destroy();
-            dtInstance = null;
-        }
-    } else {
-        console.log("loadHistory: Cargando más resultados...");
     }
 
     try {
         const currentUserId = user.value ? user.value.uid : null;
         if (currentUserId) {
-            // --- Lógica de Firestore ---
             let q = query(
                 collection(db, `users/${currentUserId}/eventHistory`),
                 orderBy("timestamp", "desc"),
                 limit(PAGE_SIZE)
             );
             if (isLoadMore && lastVisibleDoc.value) {
-                // ¡CORRECCIÓN IMPORTANTE AQUÍ! Debes volver a construir la query completa
                 q = query(
                     collection(db, `users/${currentUserId}/eventHistory`),
                     orderBy("timestamp", "desc"),
-                    startAfter(lastVisibleDoc.value), // Usar startAfter
+                    startAfter(lastVisibleDoc.value),
                     limit(PAGE_SIZE)
                 );
             }
@@ -154,15 +156,10 @@ async function loadHistory(isLoadMore = false) {
             if (newEntries.length < PAGE_SIZE) {
                 allDataLoaded.value = true;
             }
-            console.log(`Historial cargado/actualizado Firestore: ${newEntries.length} nuevas. Total: ${localHistoryEntries.value.length}. AllLoaded: ${allDataLoaded.value}`);
-            // ----------------------------------------
         } else {
-            // --- Lógica de LocalStorage ---
             const storedHistory = JSON.parse(localStorage.getItem('eventHistoryLog') || '[]');
             localHistoryEntries.value = storedHistory.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
             allDataLoaded.value = true;
-            console.log(`Historial cargado desde localStorage: ${localHistoryEntries.value.length} entradas. AllLoaded: ${allDataLoaded.value}`);
-            // -----------------------------------------
         }
     } catch (e) {
         console.error("Error cargando historial:", e);
@@ -170,215 +167,81 @@ async function loadHistory(isLoadMore = false) {
         allDataLoaded.value = true;
     } finally {
         historyLoading.value = false;
-        isCurrentlyLoading = false; // Liberar bandera
-        nextTick(() => {
-            initializeDataTable();
-        });
+        isCurrentlyLoading = false;
     }
 }
 
-function initializeDataTable() { // Ya no necesita isIncrementalLoad como parámetro aquí
-    if (dtInstance) {
-        dtInstance.destroy();
-        dtInstance = null;
-        console.log("DataTables: Instancia previa destruida.");
-    }
-
-    if (historyTableRef.value && formattedHistoryEntries.value.length > 0) {
-        dtInstance = new DataTablesCore(historyTableRef.value, {
-            ...dtOptions,
-            data: formattedHistoryEntries.value, // Siempre usa la lista completa formateada
-            columns: dtColumns,
-        });
-
-        historyTableRef.value.removeEventListener('click', handleTableClick);
-        historyTableRef.value.addEventListener('click', handleTableClick);
-        console.log("DataTables: Instancia inicializada/recreada con " + formattedHistoryEntries.value.length + " filas.");
-    } else if (historyTableRef.value) {
-        dtInstance = new DataTablesCore(historyTableRef.value, {
-            ...dtOptions,
-            data: [],
-            columns: dtColumns,
-        });
-        console.log("DataTables: Instancia inicializada/recreada con 0 filas.");
-    }
-}
-
-// En el template, añadir un botón "Cargar Más"
-// <button v-if="!allDataLoaded && !historyLoading" @click="loadHistory(true)">Cargar Más</button>
-
-onMounted(() => {
-    // loadHistory() se llamará a través del watcher de authLoading y luego user,
-    // o directamente si no hay usuario. No es necesario llamarlo explícitamente aquí
-    // si los watchers en useUserData y useAuth están bien configurados.
-    // Sin embargo, para asegurar la carga inicial si no hay usuario, o si el usuario ya está
-    // cargado antes de que este componente se monte, una llamada aquí puede ser necesaria.
-    // Vamos a mantenerlo por ahora pero con cuidado.
-    loadHistory();
-
-    watch(user, (newUser, oldUser) => {
-        // Solo recargar si el UID realmente cambió, o si uno es null y el otro no.
-        const newUid = newUser ? newUser.uid : null;
-        const oldUid = oldUser ? oldUser.uid : null;
-
-        if (newUid !== oldUid) {
-            console.log(`EventHistoryView: User state changed (Old: ${oldUid}, New: ${newUid}). Reloading history.`);
-            lastVisibleDoc.value = null;
-            allDataLoaded.value = false;
-            if (dtInstance) { // Destruir tabla antes de cargar nuevos datos de usuario
-                dtInstance.destroy();
-                dtInstance = null;
-                localHistoryEntries.value = []; // Limpiar para evitar mostrar datos viejos
-            }
-            loadHistory(false); // Carga completa para el nuevo estado de usuario
-        }
-    }, { deep: true }); // deep: true por si acaso, aunque UID es primitivo
-});
-
-// --- Configuración de DataTables ---
-const dtColumns = [
-    {
-        title: 'Fecha y Hora',
-        data: 'displayTimestamp',
-        render: (data, type, row) => type === 'display' ? data : (row.timestamp?.seconds || new Date(row.timestamp).getTime() / 1000) // Para ordenamiento
-    },
-    { title: 'Elemento Modificado', data: 'displayEntity' },
-    { title: 'Tipo de Cambio', data: 'displayEventType' },
-    {
-        title: 'Acciones',
-        data: null, // No se enlaza directamente a un campo de datos
-        orderable: false,
-        searchable: false,
-        responsivePriority: 1,
-        className: 'text-center',
-        render: (data, type, row) => {
-            // 'row' aquí es el objeto de formattedHistoryEntries, que incluye 'originalEntry'
-            return `
-          <button data-action="details" data-id="${row.id}" 
-                  class="px-3 py-1 cursor-pointer bg-secondary-600 text-white text-xs font-medium rounded hover:bg-secondary-700 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-secondary-500 transition-all dark:bg-dark-secondary-500 dark:text-dark-text-base dark:hover:bg-dark-secondary-600 dark:focus:ring-dark-secondary-500 dark:focus:ring-offset-dark-contrast">
-            Detalles
-          </button>
-        `;
-        }
-    }
-];
-
-const dtOptions = {
-    responsive: true,
-    language: {
-        search: "_INPUT_",
-        searchPlaceholder: "Buscar en historial...",
-        emptyTable: "No hay eventos registrados.",
-        info: "Mostrando _START_ a _END_ de _TOTAL_ entradas",
-        infoEmpty: "Mostrando 0 a 0 de 0 entradas",
-        infoFiltered: "(filtrado de _MAX_ entradas totales)",
-        lengthMenu: "Mostrar _MENU_ entradas",
-        loadingRecords: "Cargando...",
-        processing: "Procesando...",
-        zeroRecords: "No se encontraron registros coincidentes",
-        paginate: {
-            first: "Primero",
-            last: "Último",
-            next: "Siguiente",
-            previous: "Anterior"
-        },
-        aria: {
-            sortAscending: ": activar para ordenar la columna ascendente",
-            sortDescending: ": activar para ordenar la columna descendente"
-        }
-    },
-    pageLength: 10,
-    lengthMenu: [10, 25, 50, 100],
-    order: [[0, 'desc']] // Ordenar por la primera columna (Fecha) descendente por defecto
-};
-
-
-function handleTableClick(event) {
-    const button = event.target.closest('button[data-action="details"]');
-    if (button) {
-        const entryId = button.dataset.id;
-        const entry = localHistoryEntries.value.find(e => e.id === entryId);
-        if (entry) {
-            showDetails(entry);
-        }
-    }
-}
-
-onMounted(() => {
-    console.log("EventHistoryView: onMounted. La carga inicial la maneja el watcher de 'user'.");
-    // NINGUNA llamada a loadHistory() aquí
-});
-
-// ÚNICO Watcher responsable de la carga inicial y cambios de usuario
+// Único watcher responsable de la carga inicial y de los cambios de usuario.
+// oldUser === undefined SÓLO ocurre en la llamada sintética de `immediate` —
+// debe cargar siempre esa primera vez, incluso sin usuario (newUid null),
+// porque si no, "null !== null" nunca dispara loadHistory y el skeleton
+// queda cargando para siempre cuando no hay sesión iniciada.
 watch(user, (newUser, oldUser) => {
     const newUid = newUser ? newUser.uid : null;
     const oldUid = oldUser ? oldUser.uid : null;
-
-    // Cargar datos SIEMPRE que cambie el estado de autenticación (null vs user, o user A vs user B)
-    // La primera ejecución (immediate: true) manejará el estado inicial.
-    if (newUid !== oldUid) {
-        console.log(`EventHistoryView: Watcher 'user' detectó cambio (Old: ${oldUid}, New: ${newUid}). Llamando loadHistory(false).`);
-        loadHistory(false); // Carga completa/reseteo para el nuevo estado
+    if (oldUser === undefined || newUid !== oldUid) {
+        loadHistory(false);
     }
-
-}, { deep: true, immediate: true }); // immediate: true es CLAVE
-
+}, { deep: true, immediate: true });
 
 onUnmounted(() => {
-    if (unsubscribeSnapshot) {
-        unsubscribeSnapshot();
-    }
-    if (dtInstance) {
-        dtInstance.destroy();
-        dtInstance = null;
-    }
-    if (historyTableRef.value) {
-        historyTableRef.value.removeEventListener('click', handleTableClick);
-    }
+    isCurrentlyLoading = false;
 });
-
 </script>
 
 <template>
-    <div class="space-y-8 mt-4">
-        <h1 class="text-2xl font-semibold text-primary-800 dark:text-dark-primary-200">
-            Historial de Eventos del Sistema
-        </h1>
-        <div v-if="historyLoading" class="text-center py-10 text-text-muted italic dark:text-dark-text-muted">
-            Cargando historial...
+    <div class="space-y-6">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+            <div>
+                <h1 class="ui-h1">Historial</h1>
+                <p class="mt-1 text-sm text-stone-500 dark:text-stone-400">Registro de cambios en tu cuenta</p>
+            </div>
+            <input v-model="searchQuery" type="search" placeholder="Buscar en el historial…" class="ui-input-sm w-full max-w-[240px]" />
         </div>
-        <div v-else-if="historyError" class="text-center py-10 text-danger-600 font-medium dark:text-danger-400">
-            Error al cargar el historial: {{ historyError }}
-        </div>
-        <div v-else-if="formattedHistoryEntries.length === 0"
-            class="text-center py-10 text-text-muted italic dark:text-dark-text-muted">
-            No hay eventos registrados en el historial.
-        </div>
-        <div v-else class="bg-contrast p-0 rounded-lg shadow-md dark:bg-dark-contrast dark:shadow-lg overflow-hidden">
-            <div class="ps-4 mt-4">
-                <button v-if="!allDataLoaded && !historyLoading && formattedHistoryEntries.length > 0"
-                    @click="loadHistory(true)"
-                    class="cursor-pointer px-2 py-1 text-sm transition-all bg-accent-500 text-white font-semibold rounded-md shadow-sm hover:bg-accent-600">
-                    Cargar Más Resultados
-                </button>
-                <p v-if="allDataLoaded && formattedHistoryEntries.length > 0"
-                    class="text-text-muted dark:text-dark-text-muted">
-                    Todos los eventos han sido cargados.
+
+        <ErrorMessage v-if="historyError" :message="historyError" />
+
+        <template v-else>
+            <div v-if="historyLoading && localHistoryEntries.length === 0" class="ui-card divide-y divide-stone-100 dark:divide-stone-800">
+                <div v-for="n in 4" :key="n" class="flex items-center gap-4 px-5 py-4">
+                    <div class="ui-skeleton h-4 w-10" :style="{ animation: `shimmer 1.4s ease-in-out ${(n - 1) * 0.1}s infinite` }"></div>
+                    <div class="ui-skeleton h-5 w-16 rounded-full" :style="{ animation: `shimmer 1.4s ease-in-out ${(n - 1) * 0.1}s infinite` }"></div>
+                    <div class="ui-skeleton h-4 flex-1" :style="{ animation: `shimmer 1.4s ease-in-out ${(n - 1) * 0.1}s infinite` }"></div>
+                </div>
+            </div>
+
+            <div v-else-if="groupedHistory.length === 0" class="ui-empty">
+                <h3 class="text-base font-semibold text-stone-700 dark:text-stone-200">Sin eventos</h3>
+                <p class="mt-1.5 max-w-sm text-sm text-stone-500 dark:text-stone-400">
+                    {{ searchQuery ? 'Ningún evento coincide con tu búsqueda.' : 'Todavía no hay eventos registrados.' }}
                 </p>
             </div>
-            <div class="datatable-container p-4">
-                <table class="display wrap compact hover cell-border" style="width:100%" ref="historyTableRef">
-                </table>
+
+            <div v-else class="ui-card overflow-hidden">
+                <template v-for="group in groupedHistory" :key="group.label">
+                    <div class="bg-surface-muted px-5 py-2 text-xs font-semibold text-stone-500 dark:bg-stone-900/60 dark:text-stone-400">
+                        {{ group.label }}
+                    </div>
+                    <div v-for="entry in group.entries" :key="entry.id"
+                        class="flex flex-wrap items-center gap-3 border-t border-stone-100 px-5 py-3.5 max-[640px]:items-start dark:border-stone-800">
+                        <span class="w-[56px] shrink-0 tabular-nums text-xs text-stone-400">{{ formatTime(entry.timestamp) }}</span>
+                        <span :class="badgeClass(entry.eventType)" class="shrink-0">{{ getEventMeta(entry.eventType).label }}</span>
+                        <span class="min-w-0 flex-1 truncate text-sm text-stone-700 max-[640px]:order-last max-[640px]:w-full max-[640px]:basis-full max-[640px]:whitespace-normal dark:text-stone-300">
+                            {{ buildDescription(entry) }}
+                        </span>
+                        <button type="button" class="ui-btn-subtle shrink-0" @click="showDetails(entry)">Ver detalle</button>
+                    </div>
+                </template>
             </div>
-        </div>
+
+            <div v-if="!allDataLoaded && !historyLoading && groupedHistory.length > 0" class="flex justify-center">
+                <button type="button" class="ui-btn-outline" @click="loadHistory(true)">Cargar más eventos</button>
+            </div>
+            <p v-else-if="allDataLoaded && groupedHistory.length > 0" class="text-center text-xs text-stone-400">
+                Todos los eventos han sido cargados.
+            </p>
+        </template>
 
         <EventDetailsModal :show="isDetailsModalVisible" :event-entry="selectedEventEntry" @close="closeDetailsModal" />
     </div>
 </template>
-
-
-
-<style scoped>
-/* Estilos específicos para esta vista si son necesarios */
-/* Los estilos de DataTables deben importarse globalmente o en main.css */
-</style>

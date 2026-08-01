@@ -165,23 +165,25 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             return [{ usd: existingRate, date: dateToFetch, source: 'Firebase' }];
         }
 
-        // 2. SI NO EXISTE, CONSULTAR A LA EDGE FUNCTION
+        // 2. SI NO EXISTE, CONSULTAR LA API PÚBLICA. Ojo: dolarflashve.eu/api/rates/all
+        // sólo expone la tasa vigente "ahora mismo" (bcvUsd.rate), no admite consultar
+        // fechas pasadas — para fechas históricas ya guardadas, el chequeo de caché de
+        // arriba es el único mecanismo real; una fecha pasada nunca antes consultada
+        // recibirá la tasa de hoy.
         rateFetchingLoading.value = true;
         accountingError.value = null;
 
         try {
-            console.log(`[API] Consultando Edge Function para fecha: ${dateToFetch}...`);
-            const apiUrl = import.meta.env.VITE_DOLARVENEZUELA_API_URL;
-            const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+            console.log(`[API] Consultando tasa BCV para fecha: ${dateToFetch}...`);
+            const configuredUrl = import.meta.env.VITE_DOLARVENEZUELA_API_URL;
+            // En dev, la petición directa al host externo falla por CORS (el servidor
+            // sólo permite su propio origen) — se enruta por el proxy de vite.config.js
+            // (/api-dolar -> https://dolarflashve.eu/api), que hace la petición server-side.
+            const apiUrl = import.meta.env.DEV
+                ? configuredUrl.replace('https://dolarflashve.eu/api', '/api-dolar')
+                : configuredUrl;
 
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${anonKey}`
-                },
-                body: JSON.stringify({ date: dateToFetch })
-            });
+            const response = await fetch(apiUrl);
 
             if (!response.ok) {
                 throw new Error(`Error ${response.status}: Fallo en la comunicación con el servidor.`);
@@ -189,8 +191,8 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
 
             const data = await response.json();
 
-            if (data && data.rate) {
-                const rateValue = parseFloat(data.rate);
+            if (data && data.bcvUsd && data.bcvUsd.rate) {
+                const rateValue = parseFloat(data.bcvUsd.rate);
 
                 // 3. GUARDAR AUTOMÁTICAMENTE EN FIREBASE PARA FUTURAS CONSULTAS
                 // Usamos updateDailyRate que ya maneja la lógica de guardado y historial
@@ -200,10 +202,10 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
                 return [{
                     usd: rateValue,
                     date: dateToFetch,
-                    source: data.source || 'BCV'
+                    source: 'BCV'
                 }];
             } else {
-                throw new Error('La API no devolvió una tasa válida.');
+                throw new Error('La API no devolvió una tasa BCV válida.');
             }
         } catch (error) {
             console.error("Error en el flujo de tasa de cambio:", error);

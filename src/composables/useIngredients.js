@@ -161,13 +161,24 @@ export function useIngredients() {
         }, "No se pudo eliminar el ingrediente.");
     }
 
-    // Computed para stock status (alto, medio, bajo)
+    // Computed para nivel de stock (low/medium/high/unknown) y stockPercent.
+    // Basado en currentStock / presentationSize (no en umbrales absolutos):
+    // es el mismo porcentaje que dibuja la barra de nivel del diseño.
     const stockStatus = computed(() => {
         return globalIngredients.value.map(ing => {
-            let status = 'alto';
-            if (ing.currentStock <= 5) status = 'bajo';
-            else if (ing.currentStock <= 15) status = 'medio';
-            return { ...ing, stockStatus: status };
+            const currentStock = Number(ing.currentStock) || 0;
+            const presentationSize = Number(ing.presentationSize) || 0;
+
+            if (presentationSize <= 0) {
+                return { ...ing, stockStatus: 'unknown', stockPercent: null };
+            }
+
+            const stockPercent = (currentStock / presentationSize) * 100;
+            let status = 'high';
+            if (stockPercent <= 25) status = 'low';
+            else if (stockPercent <= 60) status = 'medium';
+
+            return { ...ing, stockStatus: status, stockPercent };
         });
     });
 

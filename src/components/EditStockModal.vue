@@ -1,6 +1,5 @@
 <script setup>
-import { ref, watch, defineProps, defineEmits } from 'vue';
-import { useToast } from "vue-toastification";
+import { ref, computed, watch } from 'vue';
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -10,82 +9,131 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save']);
 
 const newStockValue = ref(null);
-const toast = useToast();
+const touched = ref(false);
 
-// Actualiza el input cuando cambia el ingrediente o el modal se abre/cierra
-watch(() => props.ingredient, (currentIngredient) => {
-  if (props.show && currentIngredient) {
-    newStockValue.value = currentIngredient.currentStock !== undefined ? Number(currentIngredient.currentStock) : 0;
-  } else if (!props.show) {
-    newStockValue.value = null;
+watch([() => props.show, () => props.ingredient], ([show, ingredient]) => {
+  if (show && ingredient) {
+    newStockValue.value = Number(ingredient.currentStock) || 0;
+    touched.value = false;
   }
 }, { immediate: true });
 
-watch(() => props.show, (val) => {
-  if (val && props.ingredient) {
-    newStockValue.value = Number(props.ingredient.currentStock) || 0;
-  }
+const stockPercent = computed(() => {
+  if (!props.ingredient) return null;
+  const size = Number(props.ingredient.presentationSize) || 0;
+  if (size <= 0) return null;
+  return (Number(props.ingredient.currentStock) || 0) / size * 100;
 });
+
+const stockTone = computed(() => {
+  if (stockPercent.value === null) return 'ui-badge-neutral';
+  if (stockPercent.value <= 25) return 'ui-badge-danger';
+  if (stockPercent.value <= 60) return 'ui-badge-warning';
+  return 'ui-badge-success';
+});
+
+const difference = computed(() => {
+  if (!props.ingredient || newStockValue.value === null || isNaN(newStockValue.value)) return 0;
+  return newStockValue.value - (Number(props.ingredient.currentStock) || 0);
+});
+
+const errorMessage = computed(() => {
+  if (newStockValue.value === null || newStockValue.value === '' || isNaN(newStockValue.value)) {
+    return 'Ingresa un valor de stock.';
+  }
+  if (newStockValue.value < 0) return 'El stock no puede ser negativo.';
+  return null;
+});
+
+function addToStock(amount) {
+  newStockValue.value = (Number(newStockValue.value) || 0) + amount;
+  touched.value = true;
+}
+
+function setToPresentation() {
+  newStockValue.value = Number(props.ingredient?.presentationSize) || 0;
+  touched.value = true;
+}
 
 function closeModal() {
   emit('close');
 }
 
 function saveStockChange() {
-  if (newStockValue.value === null || isNaN(newStockValue.value) || newStockValue.value < 0) {
-    toast.warning('Por favor, ingresa un valor de stock válido (número mayor o igual a cero).');
-    return;
-  }
-  emit('save', newStockValue.value);
+  touched.value = true;
+  if (errorMessage.value) return;
+  emit('save', newStockValue.value); // Number crudo — IngredientsView reconstruye el objeto
 }
-
 </script>
 
 <template>
   <Transition name="modal-transition">
-    <div v-if="show && ingredient" @click.self="closeModal"
-      class="fixed inset-0 bg-black/60 overflow-y-auto h-full w-full z-50 flex justify-center items-start pt-10">
-      <div class="modal-content relative mx-auto p-6 border border-neutral-300 w-full max-w-sm shadow-lg rounded-md bg-contrast
-                  dark:border-dark-neutral-700 dark:bg-dark-contrast dark:shadow-xl">
-        <div class="flex justify-between items-center border-b border-neutral-200 pb-3 mb-4
-                      dark:border-dark-neutral-700">
-          <h3 class="text-xl font-semibold text-primary-800 dark:text-dark-primary-200">
-            Editar Stock de: <span class="text-accent-600 dark:text-dark-accent-300">{{ ingredient?.name }}</span>
-          </h3>
-          <button @click="closeModal" class="text-neutral-400 hover:text-neutral-600 text-2xl font-bold
-                         dark:text-dark-neutral-400 dark:hover:text-dark-neutral-600">&times;</button>
+    <div v-if="show && ingredient" class="ui-backdrop flex items-center justify-center p-4" @click.self="closeModal">
+      <div class="ui-modal-box modal-content max-w-sm">
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <p class="text-[11px] font-semibold uppercase tracking-wide text-stone-400">Stock</p>
+            <h3 class="mt-0.5 truncate text-[19px] font-semibold tracking-[-0.01em] text-stone-800 dark:text-stone-100">
+              {{ ingredient?.name }}
+            </h3>
+          </div>
+          <button type="button" @click="closeModal" aria-label="Cerrar"
+            class="flex h-[34px] w-[34px] shrink-0 cursor-pointer items-center justify-center rounded-control text-2xl leading-none text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-300">
+            &times;
+          </button>
         </div>
 
-        <form @submit.prevent="saveStockChange" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-text-muted dark:text-dark-text-muted">Stock Actual:</label>
-            <p class="mt-1 text-base text-text-base dark:text-dark-text-base">
-              {{ ingredient?.currentStock !== undefined ? ingredient.currentStock : 'N/A' }} {{ ingredient?.unit || ''
-              }}
-            </p>
-          </div>
-          <hr class="border-neutral-200 dark:border-dark-neutral-700" />
-          <div>
-            <label :for="'edit-stock-value-' + ingredient?.id"
-              class="block text-sm font-medium text-text-base dark:text-dark-text-base">
-              Nuevo Stock Total (en {{ ingredient?.unit || '' }}):
-            </label>
-            <input :id="'edit-stock-value-' + ingredient?.id" type="number" v-model.number="newStockValue" required
-              min="0" step="any" placeholder="Ej: 800" class="mt-1 block w-full px-3 py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm
-                          dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base
-                          dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400" />
+        <form class="mt-5 space-y-4" @submit.prevent="saveStockChange">
+          <div class="ui-panel flex items-center justify-between px-3.5 py-3">
+            <div>
+              <p class="ui-label !mb-1">Stock actual</p>
+              <p class="text-[22px] font-semibold tabular-nums text-stone-800 dark:text-stone-100">
+                {{ ingredient?.currentStock }} <span class="text-sm font-normal text-stone-400">{{ ingredient?.unit }}</span>
+              </p>
+            </div>
+            <span v-if="stockPercent !== null" :class="stockTone">{{ Math.round(stockPercent) }}%</span>
           </div>
 
-          <div class="flex justify-end pt-4 border-t border-neutral-200 mt-4 space-x-3
-                      dark:border-dark-neutral-700">
-            <button type="button" @click="closeModal" class="px-4 py-2 cursor-pointer bg-neutral-300 text-text-base transition-all rounded-md hover:bg-neutral-400
-                     dark:bg-dark-neutral-700 dark:text-dark-text-base dark:hover:bg-dark-neutral-600">
-              Cancelar
+          <div>
+            <label class="ui-label" :for="'edit-stock-value-' + ingredient?.id">
+              Nuevo stock total (en {{ ingredient?.unit || '' }})
+            </label>
+            <input :id="'edit-stock-value-' + ingredient?.id" v-model.number="newStockValue" type="number" min="0"
+              step="any" placeholder="Ej: 800" :class="['ui-input', errorMessage && touched && 'ui-input-error']"
+              @blur="touched = true" />
+            <p v-if="errorMessage && touched" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errorMessage }}</p>
+          </div>
+
+          <div class="flex flex-wrap gap-1.5">
+            <button type="button" @click="addToStock(100)"
+              class="cursor-pointer rounded-chip border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-stone-600 transition-colors hover:border-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300">
+              +100
             </button>
-            <button type="submit"
-              class="px-4 py-2 cursor-pointer bg-accent-500 text-white font-semibold transition-all rounded-md shadow-sm hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500
-                     dark:bg-dark-accent-400 dark:text-dark-text-base dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400 dark:focus:ring-offset-dark-contrast">
-              Actualizar Stock
+            <button type="button" @click="addToStock(250)"
+              class="cursor-pointer rounded-chip border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-stone-600 transition-colors hover:border-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300">
+              +250
+            </button>
+            <button type="button" @click="addToStock(500)"
+              class="cursor-pointer rounded-chip border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-stone-600 transition-colors hover:border-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300">
+              +500
+            </button>
+            <button type="button" @click="setToPresentation"
+              class="cursor-pointer rounded-chip border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-stone-600 transition-colors hover:border-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300">
+              1 pres.
+            </button>
+          </div>
+
+          <p class="text-xs text-stone-500 dark:text-stone-400">
+            Diferencia registrada en el historial:
+            <span class="font-semibold tabular-nums" :class="difference > 0 ? 'text-emerald-600 dark:text-emerald-400' : difference < 0 ? 'text-red-600 dark:text-red-400' : ''">
+              {{ difference > 0 ? '+' : '' }}{{ difference }}
+            </span>
+          </p>
+
+          <div class="mt-2 flex items-center justify-between gap-3">
+            <button type="button" @click="closeModal" class="ui-btn-outline">Cancelar</button>
+            <button type="submit" :class="errorMessage && touched ? 'ui-btn-disabled' : 'ui-btn-primary'">
+              Actualizar stock
             </button>
           </div>
         </form>

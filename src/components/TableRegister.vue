@@ -1,190 +1,98 @@
 <script setup>
-// src/components/TableRegister.vue
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import { computed } from 'vue';
+import ResponsiveTable from './ui/ResponsiveTable.vue';
+import { useDataTable } from '../composables/useDataTable.js';
 import { formatCurrency } from '../utils/utils.js';
-import DataTable from 'datatables.net-vue3';
-import DataTablesCore from 'datatables.net-dt';
-import DataTablesResponsive from 'datatables.net-responsive-dt';
 
-DataTable.use(DataTablesCore);
-DataTable.use(DataTablesResponsive);
-
-const props = defineProps({ records: { type: Array, default: () => [] } });
+const props = defineProps({
+    records: { type: Array, default: () => [] },
+    loading: { type: Boolean, default: false },
+});
 const emit = defineEmits(['edit-record', 'delete-record']);
 
-const dataTableRef = ref(null);
-let tableElement = null;
-let clickListener = null;
+const { query, page, filtered, paged, total, totalPages, rangeFrom, rangeTo, next, prev } = useDataTable(
+    () => props.records,
+    { searchFields: ['productName'], pageSize: 10, defaultSort: { key: 'date', dir: 'desc' } }
+);
 
-const columns = computed(() => [
-    { // Columna 0
-        title: 'Produccion', data: null,
-        responsivePriority: 1,
-        render: (data, type, row) => `${row.productName || 'Receta Desconocida'} <br><span class='text-xs text-text-muted dark:text-dark-text-muted'>Lote: ${row.batchSize || '?'}</span>`
-    },
-    { data: 'date', title: 'Fecha' }, // Columna 1
-    { // Columna 2
-        data: 'totalRevenue', title: 'Ingreso Total', className: 'text-right',
-        render: (data) => formatCurrency(data)
-    },
-    { // Columna 3
-        data: 'operatingCostRecipeOnly', title: 'Gastos Op. (Ingr.+Emp.)', className: 'text-right',
-        render: (data) => formatCurrency(data)
-    },
-    { // Columna 4
-        data: 'laborCostForBatch', title: 'Mano de Obra', className: 'text-right',
-        render: (data) => formatCurrency(data)
-    },
-    { // Columna 5
-        data: 'netProfit', title: 'Ganancia Neta', className: 'text-right text-success-700 dark:text-success-400 font-medium',
-        render: (data) => formatCurrency(data)
-    },
-{ // MODIFICADA Columna 6: Estado de Venta
-        title: 'Vendido',
-        // Usar una función para data para manejar de forma segura la propiedad 'isSold' ausente
-        data: row => row.hasOwnProperty('isSold') ? row.isSold : false,
-        className: 'text-center',
-        render: (data, type, row) => {
-            // 'data' aquí es el resultado de la función data de arriba (true o false)
-            return data ?
-                 '<span class="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-green-100 bg-green-800 dark:bg-green-600 rounded-full">Sí</span>' :
-                 '<span class="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 bg-red-700 dark:bg-red-600 rounded-full">No</span>';
-        }
-    },
-    { // Columna 7 (antes 6)
-        title: 'Acciones', data: null, orderable: false, searchable: false, responsivePriority: 1, className: 'text-center',
-        render: (data, type, row) => {
-            return `
-        <button data-action="edit" data-id="${row.id}" class="px-2 py-1 cursor-pointer bg-secondary-600 text-white text-xs font-medium rounded hover:bg-secondary-700 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-secondary-500 transition-all dark:bg-dark-secondary-500 dark:text-dark-text-base dark:hover:bg-dark-secondary-600 dark:focus:ring-dark-secondary-500 dark:focus:ring-offset-dark-contrast mr-2">
-          Editar
-        </button>
-        <button data-action="delete" data-id="${row.id}" class="px-2 py-1 cursor-pointer bg-danger-600 text-white text-xs font-medium rounded hover:bg-danger-700 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-danger-500 transition-all dark:bg-danger-700 dark:text-dark-text-base dark:hover:bg-danger-800 dark:focus:ring-danger-600 dark:focus:ring-offset-dark-contrast">
-          Eliminar
-        </button>
-      `;
-        }
-    }
-]);
+const columns = [
+    { key: 'productName', label: 'Producción', mobilePrimary: true },
+    { key: 'date', label: 'Fecha' },
+    { key: 'totalRevenue', label: 'Ingreso total', align: 'right' },
+    { key: 'recipeOnlyCost', label: 'Gastos op. (ingr.+emp.)', align: 'right' },
+    { key: 'laborCost', label: 'Mano de obra', align: 'right' },
+    { key: 'netProfit', label: 'Ganancia neta', align: 'right' },
+    { key: 'isSold', label: 'Vendido', align: 'right' },
+];
 
-const options = {
-    responsive: true,
-    language: {
-        search: "_INPUT_",
-        searchPlaceholder: "Buscar registro...",
-        info: "Mostrando _START_ a _END_ de _TOTAL_ registros",
-        infoEmpty: "No se encontraron registros",
-        infoFiltered: "(filtrados de un total de _MAX_ registros)",
-        lengthMenu: "Mostrar _MENU_ registros",
-        paginate: {
-            first: "Primero",
-            last: "Ultimo",
-            next: "Siguiente",
-            previous: "Anterior"
-        },
-        zeroRecords: "No se encontraron registros",
-        emptyTable: "No se encontraron registros",
-        loadingRecords: "Cargando...",
-        processing: "Procesando...",
-    },
-    pageLength: 10,
-    lengthMenu: [10, 25, 50],
-    order: [[1, 'desc']], // Ordena por fecha por defecto
-    footerCallback: function (tfoot, data, start, end, display) {
-        var api = this.api();
-        const sumColumnByDataProp = (propName) => api.column(propName + ':name', { page: 'current' }).data().reduce((a, b) => a + (Number(b) || 0), 0);
-
-        const totalRevenue = sumColumnByDataProp('totalRevenue');
-        const totalOperatingCostRecipeOnly = sumColumnByDataProp('operatingCostRecipeOnly');
-        const totalLaborCostForBatch = sumColumnByDataProp('laborCostForBatch');
-        const totalNetProfit = sumColumnByDataProp('netProfit');
-
-        const footerNode = api.table().footer();
-        if (!footerNode) return;
-        const footerCells = footerNode.querySelectorAll('th');
-
-        // Ahora hay 7 columnas en el cuerpo, pero el footer tiene 6 celdas para totales + 1 de acciones
-        // La celda de "Vendido" en el footer no mostrará un total.
-        if (footerCells.length >= 7) { // Corresponde al número de <th> en <tfoot>
-            // La primera celda del footer (colspan=2) es para "TOTALES:"
-            footerCells[1].innerHTML = formatCurrency(totalRevenue); // Columna Ingreso Total
-            footerCells[2].innerHTML = formatCurrency(totalOperatingCostRecipeOnly); // Columna Gastos Op.
-            footerCells[3].innerHTML = formatCurrency(totalLaborCostForBatch); // Columna Mano de Obra
-            footerCells[4].innerHTML = formatCurrency(totalNetProfit); // Columna Ganancia Neta
-            // footerCells[5] (Vendido) queda vacío o con un guion si se desea
-            // footerCells[6] (Acciones) queda vacío
-        } else {
-            console.error("Footer mismatch. Expected at least 7 footer th elements. Found:", footerCells.length);
-        }
-    },
-    columnDefs: [
-        { name: 'productName', targets: 0 },
-        { name: 'date', targets: 1 },
-        { name: 'totalRevenue', targets: 2 },
-        { name: 'operatingCostRecipeOnly', targets: 3 },
-        { name: 'laborCostForBatch', targets: 4 },
-        { name: 'netProfit', targets: 5 },
-        { name: 'isSold', targets: 6, orderable: true, searchable: false }, // Nueva definición para isSold
-        { name: 'colAcciones', targets: 7 } // Acciones ahora es target 7
-    ]
-};
-
-onMounted(() => {
-    if (dataTableRef.value?.$el) {
-        tableElement = dataTableRef.value.$el;
-
-        clickListener = (event) => {
-            const button = event.target.closest('button[data-action]');
-            if (!button) return;
-
-            const action = button.dataset.action;
-            const id = button.dataset.id;
-            // props.records ahora debería incluir el campo isSold para cada registro
-            const recordData = props.records.find(rec => rec.id === id);
-
-            if (action === 'edit') {
-                if (recordData) emit('edit-record', recordData);
-            } else if (action === 'delete') {
-                emit('delete-record', recordData); // Para eliminar, solo se usa el ID como antes
-            }
-        };
-        tableElement.addEventListener('click', clickListener);
-    }
-});
-
-onBeforeUnmount(() => {
-    if (tableElement && clickListener) {
-        tableElement.removeEventListener('click', clickListener);
-    }
-});
+// Cambio intencional: totaliza TODAS las filas filtradas, no sólo la página visible.
+const totals = computed(() => filtered.value.reduce((acc, r) => {
+    acc.totalRevenue += Number(r.totalRevenue) || 0;
+    acc.recipeOnlyCost += Number(r.recipeOnlyCost) || 0;
+    acc.laborCost += Number(r.laborCost) || 0;
+    acc.netProfit += Number(r.netProfit) || 0;
+    return acc;
+}, { totalRevenue: 0, recipeOnlyCost: 0, laborCost: 0, netProfit: 0 }));
 </script>
 
 <template>
-    <div class="datatable-container p-4">
-        <DataTable ref="dataTableRef" :data="records" :columns="columns" :options="options"
-            class="display wrap compact hover cell-border" width="100%">
-            <thead>
-                <tr>
-                    <th>Produccion</th>
-                    <th>Fecha</th>
-                    <th class="text-right">Ingreso Total</th>
-                    <th class="text-right">Gastos Op. (Ingr.+Emp.)</th>
-                    <th class="text-right">Mano de Obra</th>
-                    <th class="text-right">Ganancia Neta</th>
-                    <th class="text-center">Vendido</th>
-                    <th class="text-center">Acciones</th>
-                </tr>
-            </thead>
-            <tfoot>
-                <tr>
-                    <th colspan="2" class="text-right font-bold">TOTALES:</th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                </tr>
-            </tfoot>
-        </DataTable>
-    </div>
+    <ResponsiveTable :columns="columns" :rows="paged" row-key="id" :loading="loading"
+        :empty="{ title: 'Sin producción registrada', message: 'Registra tu primer lote desde el formulario de arriba.' }"
+        noun="registros" :total="total" :range-from="rangeFrom" :range-to="rangeTo" :page="page"
+        :total-pages="totalPages" @next="next" @prev="prev">
+        <template #toolbar>
+            <h2 class="text-base font-semibold text-stone-800 dark:text-stone-100">Historial de producción</h2>
+            <input v-model="query" type="search" placeholder="Buscar producción…" class="ui-input-sm w-full max-w-[220px]" />
+        </template>
+
+        <template #cell-productName="{ row }">
+            <p class="font-medium text-stone-800 dark:text-stone-100">{{ row.productName || 'Receta desconocida' }}</p>
+            <p class="text-xs text-stone-400">Lote: {{ row.batchSize ?? '?' }}</p>
+        </template>
+
+        <template #cell-totalRevenue="{ row }">
+            <span class="tabular-nums">{{ formatCurrency(row.totalRevenue) }}</span>
+        </template>
+        <template #cell-recipeOnlyCost="{ row }">
+            <span class="tabular-nums">{{ formatCurrency(row.recipeOnlyCost) }}</span>
+        </template>
+        <template #cell-laborCost="{ row }">
+            <span class="tabular-nums">{{ formatCurrency(row.laborCost) }}</span>
+        </template>
+        <template #cell-netProfit="{ row }">
+            <span class="font-medium tabular-nums text-emerald-700 dark:text-emerald-400">{{ formatCurrency(row.netProfit) }}</span>
+        </template>
+        <template #cell-isSold="{ row }">
+            <span :class="row.isSold ? 'ui-badge-success' : 'ui-badge-neutral'">{{ row.isSold ? 'Sí' : 'No' }}</span>
+        </template>
+
+        <template #actions="{ row }">
+            <button type="button" class="ui-btn-subtle" @click="emit('edit-record', row)">Editar</button>
+            <button type="button" class="ui-btn-danger-ghost" @click="emit('delete-record', row)">Eliminar</button>
+        </template>
+
+        <template #totals>
+            <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm">
+                <span class="font-semibold text-stone-600 dark:text-stone-300">Totales del periodo</span>
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-1.5">
+                    <span class="flex items-baseline gap-1.5">
+                        <span class="text-xs text-stone-400">Ingreso</span>
+                        <span class="tabular-nums font-medium text-stone-800 dark:text-stone-100">{{ formatCurrency(totals.totalRevenue) }}</span>
+                    </span>
+                    <span class="flex items-baseline gap-1.5">
+                        <span class="text-xs text-stone-400">Gastos op.</span>
+                        <span class="tabular-nums font-medium text-stone-800 dark:text-stone-100">{{ formatCurrency(totals.recipeOnlyCost) }}</span>
+                    </span>
+                    <span class="flex items-baseline gap-1.5">
+                        <span class="text-xs text-stone-400">M. obra</span>
+                        <span class="tabular-nums font-medium text-stone-800 dark:text-stone-100">{{ formatCurrency(totals.laborCost) }}</span>
+                    </span>
+                    <span class="flex items-baseline gap-1.5">
+                        <span class="text-xs text-stone-400">Ganancia neta</span>
+                        <span class="tabular-nums font-semibold text-emerald-700 dark:text-emerald-400">{{ formatCurrency(totals.netProfit) }}</span>
+                    </span>
+                </div>
+            </div>
+        </template>
+    </ResponsiveTable>
 </template>

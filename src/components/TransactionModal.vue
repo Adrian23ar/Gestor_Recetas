@@ -2,6 +2,7 @@
 // src/components/TransactionModal.vue
 import { ref, watch, computed, nextTick } from 'vue';
 import { useAccountingDataStore } from '../stores/accountingData';
+import DateField from './ui/DateField.vue';
 import { storeToRefs } from 'pinia';
 import { useToast } from 'vue-toastification';
 
@@ -60,8 +61,6 @@ const actualDateOfRate = ref(null);
 const dateChangeDebounceTimer = ref(null);
 
 const isEditing = computed(() => !!props.transactionData?.id);
-
-// MODIFICADO: La función daysBetween ya no es necesaria y se puede eliminar.
 
 watch(() => props.show, async (newShow) => {
     if (newShow) {
@@ -128,7 +127,8 @@ watch(() => formData.value.date, (newDate, oldDate) => {
     }
 });
 
-// MODIFICADO: La lógica ahora es más simple y siempre ofrece la elección.
+// Cascada de resolución de tasa: API -> exacta guardada -> anterior con elección -> manual.
+// INVARIANTE: no tocar esta lógica, sólo el maquetado del modal.
 async function attemptFetchRateForSelectedDate(selectedDate) {
     isRateLoadingInModal.value = true;
     rateErrorMessageForModal.value = '';
@@ -158,7 +158,6 @@ async function attemptFetchRateForSelectedDate(selectedDate) {
     // 3. Fallo Exacto -> Buscar cualquier tasa anterior
     const latestRateData = getLatestRateDataBefore(selectedDate);
     if (latestRateData) {
-        // Si se encuentra una tasa anterior (sin importar la antigüedad), se ofrece la elección.
         staleRateInfo.value = latestRateData;
         showStaleRateChoice.value = true;
         rateErrorMessageForModal.value = `No hay tasa para esta fecha. La última guardada es del ${formatDate(latestRateData.date)}.`;
@@ -260,134 +259,116 @@ const amountUsdDisplay = computed(() => {
     }
     return '0.00';
 });
+
+// INVARIANTE: no simplificar — el submit debe seguir deshabilitado en cualquiera de estos casos.
+const isSubmitDisabled = computed(() =>
+    isRateLoadingInModal.value || showStaleRateChoice.value || !applicableRate.value ||
+    !formData.value.amountBs || formData.value.amountBs <= 0 || !formData.value.date || !formData.value.description
+);
 </script>
 
 <template>
     <Transition name="modal-transition">
-        <div v-if="show"
-            class="fixed inset-0 bg-black/60 overflow-y-auto h-full w-full z-50 flex justify-center items-start pt-6 sm:pt-10 pb-6"
-            @click.self="closeModal">
-            <div
-                class="modal-content relative mx-auto p-5 sm:p-6 border border-neutral-300 w-full max-w-lg shadow-lg rounded-md bg-contrast dark:border-dark-neutral-700 dark:bg-dark-contrast dark:shadow-xl">
-                <div
-                    class="flex justify-between items-center border-b border-neutral-200 pb-3 mb-4 dark:border-dark-neutral-700">
-                    <h3 class="text-xl font-semibold text-primary-800 dark:text-dark-primary-200">
-                        {{ isEditing ? 'Editar' : 'Registrar' }} Movimiento
-                    </h3>
-                    <button @click="closeModal"
-                        class="text-neutral-400 hover:text-neutral-600 text-2xl font-bold dark:text-dark-neutral-400 dark:hover:text-dark-neutral-600">&times;</button>
+        <div v-if="show" class="ui-backdrop flex items-center justify-center p-4" @click.self="closeModal">
+            <div class="ui-modal-box modal-content max-w-lg">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="min-w-0">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-stone-400">Movimiento</p>
+                        <h3 class="mt-0.5 text-[19px] font-semibold tracking-[-0.01em] text-stone-800 dark:text-stone-100">
+                            {{ isEditing ? 'Editar movimiento' : 'Registrar movimiento' }}
+                        </h3>
+                    </div>
+                    <button type="button" @click="closeModal" aria-label="Cerrar"
+                        class="flex h-[34px] w-[34px] shrink-0 cursor-pointer items-center justify-center rounded-control text-2xl leading-none text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-300">
+                        &times;
+                    </button>
                 </div>
 
-                <form @submit.prevent="save" class="space-y-4">
-                    <div class="flex items-center space-x-4">
-                        <span class="text-sm font-medium text-text-base dark:text-dark-text-base">Tipo:</span>
-                        <label class="flex items-center">
-                            <input type="radio" v-model="formData.type" value="income" name="transactionType"
-                                class="form-radio">
-                            <span class="ml-2 text-sm text-text-base dark:text-dark-text-base">Ingreso</span>
-                        </label>
-                        <label class="flex items-center">
-                            <input type="radio" v-model="formData.type" value="expense" name="transactionType"
-                                class="form-radio">
-                            <span class="ml-2 text-sm text-text-base dark:text-dark-text-base">Egreso</span>
-                        </label>
+                <form class="mt-5 max-h-[75vh] space-y-4 overflow-y-auto pr-1" @submit.prevent="save">
+                    <div class="ui-seg-track w-fit">
+                        <button type="button" :class="formData.type === 'income' ? 'ui-seg-active' : 'ui-seg'" @click="formData.type = 'income'">
+                            Ingreso
+                        </button>
+                        <button type="button" :class="formData.type === 'expense' ? 'ui-seg-active' : 'ui-seg'" @click="formData.type = 'expense'">
+                            Egreso
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3 max-[640px]:grid-cols-1">
+                        <div>
+                            <label class="ui-label" for="tx-date">Fecha</label>
+                            <DateField id="tx-date" v-model="formData.date" />
+                            <p v-if="isRateLoadingInModal" class="mt-1 text-xs italic text-stone-400">Buscando tasa…</p>
+                            <p v-else-if="rateErrorMessageForModal" class="mt-1 text-xs"
+                                :class="showStaleRateChoice ? 'text-amber-700 dark:text-amber-400' : 'text-red-600 dark:text-red-400'">
+                                {{ rateErrorMessageForModal }}
+                            </p>
+                        </div>
+                        <div>
+                            <label class="ui-label" for="tx-category">Categoría</label>
+                            <input id="tx-category" v-model="formData.category" type="text" placeholder="Ej: Ventas, Materia prima" class="ui-input" />
+                        </div>
                     </div>
 
                     <div>
-                        <label for="tx-date"
-                            class="block text-sm font-medium text-text-base dark:text-dark-text-base">Fecha:</label>
-                        <input type="date" id="tx-date" v-model="formData.date" required class="mt-1 input-field-style">
-                        <p v-if="isRateLoadingInModal" class="text-xs text-blue-600 dark:text-blue-400 mt-1 italic">
-                            Buscando tasa...
-                        </p>
-                        <p v-if="rateErrorMessageForModal && !isRateLoadingInModal" class="text-xs mt-1"
-                            :class="{ 'text-amber-600 dark:text-amber-400': showStaleRateChoice, 'text-danger-600 dark:text-danger-400 transition-all': showManualRateInput && !showStaleRateChoice }">
-                            {{ rateErrorMessageForModal }}
-                        </p>
+                        <label class="ui-label" for="tx-description">Descripción</label>
+                        <input id="tx-description" v-model="formData.description" type="text" required
+                            placeholder="Ej: Venta torta, Compra harina" class="ui-input" />
                     </div>
 
                     <div>
-                        <label for="tx-description"
-                            class="block text-sm font-medium text-text-base dark:text-dark-text-base">Descripción:</label>
-                        <input type="text" id="tx-description" v-model="formData.description" required
-                            placeholder="Ej: Venta torta, Compra harina" class="mt-1 input-field-style">
+                        <label class="ui-label" for="tx-amount-bs">Monto (Bs.)</label>
+                        <input id="tx-amount-bs" v-model.number="formData.amountBs" type="number" required min="0.01" step="0.01" class="ui-input" />
                     </div>
 
-                    <div>
-                        <label for="tx-category"
-                            class="block text-sm font-medium text-text-base dark:text-dark-text-base">Categoría:</label>
-                        <input type="text" id="tx-category" v-model="formData.category"
-                            placeholder="Ej: Ventas, Materia Prima, Gastos Op." class="mt-1 input-field-style">
-                    </div>
-
-                    <div>
-                        <label for="tx-amount-bs"
-                            class="block text-sm font-medium text-text-base dark:text-dark-text-base">Monto
-                            (Bs.):</label>
-                        <input type="number" id="tx-amount-bs" v-model.number="formData.amountBs" required min="0.01"
-                            step="0.01" class="mt-1 input-field-style">
-                    </div>
-
-                    <div class="p-3 bg-neutral-50 rounded dark:bg-dark-neutral-800/50 text-sm space-y-2">
-                        <p>Tasa Aplicada (Bs/USD):
-                            <strong class="dark:text-dark-secondary-300">
-                                {{ applicableRate ? applicableRate.toFixed(2) : (isRateLoadingInModal ? 'Buscando...' :
-                                    'N/A') }}
-                                <span v-if="actualDateOfRate && actualDateOfRate !== formData.date && applicableRate"
-                                    class="text-xs italic">
-                                    (del {{ formatDate(actualDateOfRate) }})
+                    <div class="ui-panel space-y-3 p-4">
+                        <div>
+                            <p class="ui-label !mb-1">Equivale a</p>
+                            <p class="text-[24px] font-semibold tabular-nums tracking-[-0.02em] text-stone-800 dark:text-stone-100">
+                                ${{ amountUsdDisplay }}
+                            </p>
+                            <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                                Tasa:
+                                <span class="tabular-nums font-medium text-stone-700 dark:text-stone-300">
+                                    {{ applicableRate ? applicableRate.toFixed(2) : (isRateLoadingInModal ? 'Buscando…' : 'N/A') }}
                                 </span>
-                            </strong>
-                        </p>
+                                <span v-if="actualDateOfRate && actualDateOfRate !== formData.date && applicableRate">
+                                    (BCV del {{ formatDate(actualDateOfRate) }})
+                                </span>
+                            </p>
+                        </div>
 
-                        <div v-if="showStaleRateChoice" class="p-2 border border-amber-500 rounded-md text-center">
-                            <p class="text-xs mb-2">{{ rateErrorMessageForModal }}</p>
-                            <div class="flex justify-center gap-2">
-                                <button @click.prevent="handleUseStaleRate"
-                                    class="px-2 py-1 bg-secondary-500 text-white text-xs font-medium rounded hover:bg-secondary-600 dark:bg-dark-secondary-500 dark:hover:bg-dark-secondary-600 transition-all">
+                        <div v-if="showStaleRateChoice" class="rounded-box border border-amber-200 bg-amber-50 p-3 text-center dark:border-amber-500/25 dark:bg-amber-500/10">
+                            <p class="text-xs text-amber-800 dark:text-amber-300">{{ rateErrorMessageForModal }}</p>
+                            <div class="mt-2 flex flex-wrap justify-center gap-2">
+                                <button type="button" @click.prevent="handleUseStaleRate" class="ui-btn-subtle">
                                     Usar esta tasa ({{ staleRateInfo.rate }})
                                 </button>
-                                <button @click.prevent="handleEnterManualInstead"
-                                    class="px-2 py-1 bg-neutral-500 text-white text-xs font-medium rounded hover:bg-neutral-600 dark:bg-dark-neutral-600 dark:hover:bg-dark-neutral-700 transition-all">
-                                    Ingresar Manualmente
+                                <button type="button" @click.prevent="handleEnterManualInstead" class="ui-btn-outline">
+                                    Ingresar manualmente
                                 </button>
                             </div>
                         </div>
 
-                        <div v-if="showManualRateInput && !isRateLoadingInModal && !showStaleRateChoice"
-                            class="flex items-center gap-2">
-                            <input type="number" v-model.number="manualRateInput"
-                                placeholder="Tasa manual para esta fecha" min="0" step="any"
-                                class="flex-grow block w-full px-2 py-1 border border-neutral-300 rounded-md shadow-sm text-sm dark:border-dark-neutral-700 dark:bg-dark-background dark:text-dark-text-base" />
-                            <button @click.prevent="applyManualRate"
-                                :disabled="!manualRateInput || manualRateInput <= 0"
-                                class="px-2 py-1 bg-accent-500 text-white text-xs font-medium rounded-md shadow-sm hover:bg-accent-600 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-dark-accent-400 dark:hover:bg-dark-accent-500">
+                        <div v-if="showManualRateInput && !isRateLoadingInModal && !showStaleRateChoice" class="flex items-center gap-2">
+                            <input v-model.number="manualRateInput" type="number" placeholder="Tasa manual para esta fecha" min="0" step="any"
+                                class="ui-input-sm flex-1" />
+                            <button type="button" @click.prevent="applyManualRate" :disabled="!manualRateInput || manualRateInput <= 0"
+                                class="cursor-pointer rounded-control bg-accent-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-accent-700 disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-400 dark:bg-accent-500 dark:hover:bg-accent-600 dark:disabled:bg-stone-700 dark:disabled:text-stone-500">
                                 Aplicar
                             </button>
                         </div>
-
-                        <p>Monto USD (Calculado): <strong class="dark:text-dark-secondary-300">${{ amountUsdDisplay
-                        }}</strong></p>
                     </div>
 
                     <div>
-                        <label for="tx-notes"
-                            class="block text-sm font-medium text-text-base dark:text-dark-text-base">Notas
-                            (Opcional):</label>
-                        <textarea id="tx-notes" v-model="formData.notes" rows="2"
-                            class="mt-1 input-field-style"></textarea>
+                        <label class="ui-label" for="tx-notes">Notas (opcional)</label>
+                        <textarea id="tx-notes" v-model="formData.notes" rows="2" class="ui-textarea"></textarea>
                     </div>
 
-                    <div
-                        class="flex justify-end pt-4 border-t border-neutral-200 mt-4 space-x-3 dark:border-dark-neutral-700">
-                        <button type="button" @click="closeModal"
-                            class="px-4 py-2 bg-neutral-300 text-text-base transition-all rounded-md hover:bg-neutral-400 dark:bg-dark-neutral-700 dark:text-dark-text-base dark:hover:bg-dark-neutral-600">
-                            Cancelar
-                        </button>
-                        <button type="submit"
-                            :disabled="isRateLoadingInModal || showStaleRateChoice || !applicableRate || !formData.amountBs || formData.amountBs <= 0 || !formData.date || !formData.description"
-                            class="px-4 py-2 cursor-pointer bg-accent-500 text-white font-semibold transition-all rounded-md shadow-sm hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-dark-accent-400 dark:text-dark-text-base dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400 dark:focus:ring-offset-dark-contrast">
-                            {{ isEditing ? 'Guardar Cambios' : 'Añadir Movimiento' }}
+                    <div class="mt-2 flex items-center justify-between gap-3">
+                        <button type="button" @click="closeModal" class="ui-btn-outline">Cancelar</button>
+                        <button type="submit" :disabled="isSubmitDisabled" :class="isSubmitDisabled ? 'ui-btn-disabled' : 'ui-btn-primary'">
+                            {{ isEditing ? 'Guardar cambios' : 'Añadir movimiento' }}
                         </button>
                     </div>
                 </form>
@@ -395,9 +376,3 @@ const amountUsdDisplay = computed(() => {
         </div>
     </Transition>
 </template>
-
-<style scoped>
-.fixed.inset-0 {
-    overflow-y: auto;
-}
-</style>

@@ -183,6 +183,7 @@ export function useProductionRecords() {
     return {
         productionRecords, // Estos registros ahora deben incluir isSold
         recipes,
+        globalIngredients, // Necesario para el aviso ámbar de descuento de stock
         dataLoading,
         dataError,
         loading,

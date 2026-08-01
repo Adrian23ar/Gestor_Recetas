@@ -11,6 +11,7 @@ lerna-debug.log*
 !/.env.example
 
 node_modules
+redise-o-integral-app-de-recetas
 dist
 dist-ssr
 *.local

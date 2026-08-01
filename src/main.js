@@ -44,7 +44,7 @@ export { auth, db };
 
 
 const options = {
-    position: POSITION.TOP_RIGHT,
+    position: POSITION.BOTTOM_RIGHT,
     timeout: 2000,
 };
 

@@ -1,15 +1,22 @@
 <script setup>
 import { ref, computed } from 'vue';
+import { useRoute } from 'vue-router';
 import Multiselect from '@vueform/multiselect';
+import DateField from '../components/ui/DateField.vue';
 import TableRegister from '../components/TableRegister.vue';
 import ConfirmationModal from '../components/ConfirmationModal.vue';
 import EditProductionModal from '../components/EditProductionModal.vue';
+import ErrorMessage from '../components/ErrorMessage.vue';
 import { useProductionRecords } from '../composables/useProductionRecords.js';
 import { formatCurrency } from '../utils/utils.js';
+import { multiselectTheme } from '../utils/multiselectTheme.js';
+
+const route = useRoute();
 
 const {
   productionRecords,
   recipes,
+  globalIngredients,
   dataLoading,
   dataError,
   loading,
@@ -26,23 +33,49 @@ const {
   saveChanges,
 } = useProductionRecords();
 
-const selectedRecipeId = ref(null);
-const productionDate = ref('');
+const selectedRecipeId = ref(typeof route.query.recipe === 'string' ? route.query.recipe : null);
+const productionDate = ref(null);
 
-const selectedRecipeInfo = computed(() => {
-  if (!selectedRecipeId.value) return null;
-  const recipe = recipes.value.find(r => r.id === selectedRecipeId.value);
-  if (!recipe) return null;
-  const gastosOp = recipe.calculatedRecipeOnlyCost !== undefined ? formatCurrency(recipe.calculatedRecipeOnlyCost) : 'N/A';
-  const manoDeObra = recipe.laborCostPerBatch !== undefined ? formatCurrency(recipe.laborCostPerBatch) : 'N/A';
-  return `Lote: ${recipe.itemsPerBatch || 'N/A'} items | PVP Final: ${formatCurrency(recipe.calculatedFinalPrice || 0)} | Gastos Op. (Ingr.+Emp.): ${gastosOp} | Mano Obra: ${manoDeObra}`;
+const selectedRecipe = computed(() => recipes.value.find(r => r.id === selectedRecipeId.value) || null);
+
+const selectedRecipeEstimate = computed(() => {
+  const recipe = selectedRecipe.value;
+  if (!recipe || recipe.calculatedFinalPrice === undefined) return null;
+  const items = Number(recipe.itemsPerBatch) || 1;
+  const totalRevenue = (recipe.calculatedFinalPrice || 0) * items;
+  const operatingCost = Number(recipe.calculatedRecipeOnlyCost || 0);
+  const laborCost = Number(recipe.laborCostPerBatch || 0);
+  const netProfit = totalRevenue - (operatingCost + laborCost);
+  const marginOnRevenue = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+  return { totalRevenue, operatingCost, laborCost, netProfit, marginOnRevenue };
+});
+
+const stockDeductions = computed(() => {
+  const recipe = selectedRecipe.value;
+  if (!recipe || !Array.isArray(recipe.ingredients)) return [];
+  return recipe.ingredients
+    .map(recipeIng => {
+      const globalIng = globalIngredients.value.find(g => g.id === recipeIng.ingredientId);
+      if (!globalIng) return null;
+      const currentStock = Number(globalIng.currentStock) || 0;
+      const remaining = currentStock - Number(recipeIng.quantity);
+      return {
+        id: recipeIng.ingredientId,
+        name: globalIng.name,
+        quantity: recipeIng.quantity,
+        unit: globalIng.unit,
+        remaining: Math.max(0, remaining),
+        insufficient: remaining < 0,
+      };
+    })
+    .filter(Boolean);
 });
 
 async function handleAddRecord() {
   const success = await addRecord(selectedRecipeId.value, productionDate.value);
   if (success) {
     selectedRecipeId.value = null;
-    productionDate.value = '';
+    productionDate.value = null;
   }
 }
 
@@ -50,122 +83,103 @@ function handleDeleteRecord(record) {
   openDeleteModal(record);
 }
 
-function cancelDelete() {
-  closeDeleteModal();
-}
-
 async function confirmDeleteRecord() {
   await confirmDelete();
-}
-
-function handleEditRecord(record) {
-  openEditModal(record);
-}
-
-function handleCloseEditModal() {
-  closeEditModal();
-}
-
-async function handleSaveChanges(updatedRecord) {
-  await saveChanges(updatedRecord);
 }
 </script>
 
 <template>
-  <div class="space-y-8 mt-4">
-    <div class="bg-contrast p-6 rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg">
-      <form @submit.prevent="handleAddRecord" class="space-y-4">
-        <div class="grid grid-cols-2 gap-8">
-          <div class="col-span-2 md:col-span-1">
-            <label for="select-recipe" class="block text-sm font-medium text-text-base dark:text-dark-text-base">Receta Producida:</label>
-            <Multiselect
-              id="select-recipe"
-              v-model="selectedRecipeId"
-              :options="recipes"
-              placeholder="-- Selecciona una receta --"
-              :searchable="true"
-              valueProp="id"
-              label="name"
-              trackBy="name"
-              :clearOnSelect="false"
-              :closeOnSelect="true"
-              required
-              :classes="{
-                container: 'relative mx-auto w-full flex items-center justify-end box-border cursor-pointer border border-neutral-300 rounded-md bg-contrast text-base leading-snug outline-none mt-1 dark:border-dark-neutral-700 dark:bg-dark-contrast',
-                containerActive: 'ring-2 ring-accent-500/50 border-accent-500 dark:ring-dark-accent-400/50 dark:border-dark-accent-400',
-                singleLabelText: 'overflow-ellipsis overflow-hidden block whitespace-nowrap max-w-full text-text-base dark:text-dark-text-base',
-                placeholder: 'flex items-center h-full absolute left-0 top-0 pointer-events-none bg-transparent leading-snug pl-3.5 text-text-muted dark:text-dark-text-muted',
-                dropdown: 'absolute -left-px -right-px bottom-0 transform translate-y-full border border-neutral-300 -mt-px overflow-y-auto z-50 bg-contrast flex flex-col rounded-b-md dark:border-dark-neutral-700 dark:bg-dark-contrast ring-1 ring-black/5 dark:ring-white/5',
-                dropdownHidden: 'hidden',
-                option: 'flex items-center justify-start box-border text-left cursor-pointer text-base leading-snug py-2 px-3 text-text-base dark:text-dark-text-base',
-                optionPointed: 'text-neutral-800 bg-neutral-200 dark:text-dark-neutral-100 dark:bg-dark-neutral-700',
-                optionSelected: 'text-accent-700 bg-accent-100 dark:text-dark-accent-100 dark:bg-dark-accent-600',
-                optionDisabled: 'text-neutral-400 cursor-not-allowed dark:text-dark-neutral-500',
-                noOptions: 'py-2 px-3 text-text-muted text-left dark:text-dark-text-muted',
-                noResults: 'py-2 px-3 text-text-muted text-left dark:text-dark-text-muted',
-                search: 'w-full absolute inset-0 outline-none focus:ring-0 appearance-none box-border border-0 text-base font-sans bg-white  dark:bg-dark-contrast rounded pl-3.5 rtl:pl-0 rtl:pr-3.5',
-              }"
-            >
-              <template #option="{ option }">
-                <div>{{ option.name }}</div>
-                <div class="text-xs text-text-muted dark:text-dark-text-muted ml-2">
-                  (Lote: {{ option.itemsPerBatch || 'N/A' }} | PVP: {{ formatCurrency(option.calculatedFinalPrice || 0) }})
-                </div>
-              </template>
-            </Multiselect>
-            <p v-if="selectedRecipeInfo" class="ps-0.5 mt-1 text-xs text-text-muted dark:text-dark-text-muted">
-              {{ selectedRecipeInfo }}
-            </p>
-          </div>
-
-          <div class="col-span-2 md:col-span-1">
-            <label for="production-date" class="block text-sm font-medium text-text-base dark:text-dark-text-base">Fecha Producción:</label>
-            <input
-              type="date"
-              id="production-date"
-              v-model="productionDate"
-              required
-              class="mt-1 block w-full px-3 py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-contrast dark:border-dark-neutral-700 dark:bg-dark-contrast dark:text-dark-text-base dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400"
-            />
-          </div>
-        </div>
-        <div class="text-right">
-          <button
-            type="submit"
-            :disabled="loading"
-            class="px-4 py-2 cursor-pointer bg-accent-500 text-white font-medium rounded-md shadow-sm hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500 dark:bg-dark-accent-400 dark:text-dark-text-base dark:hover:bg-dark-accent-500 dark:focus:ring-dark-accent-400 dark:focus:ring-offset-dark-background transition-all"
-          >
-            {{ loading ? 'Registrando...' : 'Registrar y Descontar Stock' }}
-          </button>
-        </div>
-      </form>
+  <div class="space-y-6">
+    <div>
+      <h1 class="ui-h1">Producción</h1>
+      <p class="mt-1 text-sm text-stone-500 dark:text-stone-400">Registra un lote y descuenta el stock automáticamente</p>
     </div>
 
-    <div class="col-span-2 bg-contrast rounded-lg shadow dark:bg-dark-contrast dark:shadow-lg">
-      <h2 class="text-xl px-6 pt-6 pb-4 font-semibold mb-4 text-primary-800 dark:text-dark-primary-200">Historial de Producción</h2>
-      <div v-if="dataLoading" class="text-center text-text-muted italic dark:text-dark-text-muted">Cargando registros...</div>
-      <div v-else-if="dataError" class="text-center text-danger-600 font-medium dark:text-danger-400">Error: {{ dataError }}</div>
-      <TableRegister
-        v-else
-        :records="productionRecords"
-        @edit-record="handleEditRecord"
-        @delete-record="handleDeleteRecord"
-      />
-    </div>
+    <ErrorMessage v-if="dataError" :message="`Error: ${dataError}`" />
 
-    <ConfirmationModal
-      :show="showDeleteModal"
-      title="Confirmar Eliminación"
-      :message="`¿Eliminar registro de '${recordToDelete?.productName || ''}'?`"
-      @close="cancelDelete"
-      @confirm="confirmDeleteRecord"
-    />
+    <template v-else>
+      <div class="grid grid-cols-[1.15fr_.85fr] items-start gap-5 max-[980px]:grid-cols-1">
+        <div class="ui-card p-5">
+          <h2 class="text-base font-semibold text-stone-800 dark:text-stone-100">Nuevo lote</h2>
+          <form class="mt-4 space-y-4" @submit.prevent="handleAddRecord">
+            <div>
+              <label class="ui-label" for="select-recipe">Receta a producir</label>
+              <Multiselect id="select-recipe" v-model="selectedRecipeId" :options="recipes" placeholder="-- Selecciona una receta --"
+                :searchable="true" valueProp="id" label="name" trackBy="name" :clearOnSelect="false" :closeOnSelect="true"
+                :classes="multiselectTheme">
+                <template #option="{ option }">
+                  <div>{{ option.name }}
+                    <span class="text-xs text-stone-400">(Lote: {{ option.itemsPerBatch || 'N/A' }} | PVP: {{ formatCurrency(option.calculatedFinalPrice || 0) }})</span>
+                  </div>
+                </template>
+              </Multiselect>
+            </div>
 
-    <EditProductionModal
-      :show="showEditModal"
-      :record="editingRecord"
-      @close="handleCloseEditModal"
-      @save="handleSaveChanges"
-    />
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="ui-label" for="production-date">Fecha de producción</label>
+                <DateField id="production-date" v-model="productionDate" />
+              </div>
+              <div>
+                <label class="ui-label">Items del lote</label>
+                <input :value="selectedRecipe?.itemsPerBatch ?? '—'" type="text" readonly disabled
+                  class="ui-input cursor-not-allowed opacity-70" />
+              </div>
+            </div>
+
+            <div v-if="stockDeductions.length > 0" class="rounded-box border border-amber-200 bg-amber-50 p-3.5 dark:border-amber-500/25 dark:bg-amber-500/10">
+              <p class="text-xs font-semibold text-amber-800 dark:text-amber-300">Al registrar se descontará del inventario:</p>
+              <ul class="mt-1.5 space-y-1 text-xs text-amber-700 dark:text-amber-400">
+                <li v-for="d in stockDeductions" :key="d.id">
+                  {{ d.quantity }} {{ d.unit }} de {{ d.name }} — quedará en
+                  <strong class="tabular-nums" :class="d.insufficient ? 'text-red-700 dark:text-red-400' : ''">{{ d.remaining }} {{ d.unit }}</strong>
+                </li>
+              </ul>
+            </div>
+
+            <button type="submit" :disabled="loading || !selectedRecipeId || !productionDate"
+              :class="(loading || !selectedRecipeId || !productionDate) ? 'ui-btn-disabled w-full' : 'ui-btn-primary w-full'">
+              {{ loading ? 'Registrando…' : 'Registrar lote y descontar stock' }}
+            </button>
+          </form>
+        </div>
+
+        <div class="ui-card-inverted rounded-card p-6">
+          <template v-if="selectedRecipeEstimate">
+            <p class="text-sm text-stone-300">Ganancia neta estimada</p>
+            <p class="mt-1 text-[36px] font-semibold tabular-nums tracking-[-0.03em]">{{ formatCurrency(selectedRecipeEstimate.netProfit) }}</p>
+            <dl class="mt-5 space-y-2.5 border-t ui-card-inverted-divider pt-4 text-sm">
+              <div class="flex items-center justify-between">
+                <dt class="text-stone-300">Ingreso total</dt>
+                <dd class="tabular-nums">{{ formatCurrency(selectedRecipeEstimate.totalRevenue) }}</dd>
+              </div>
+              <div class="flex items-center justify-between">
+                <dt class="text-stone-300">Gastos op. (ingr.+emp.)</dt>
+                <dd class="tabular-nums">{{ formatCurrency(selectedRecipeEstimate.operatingCost) }}</dd>
+              </div>
+              <div class="flex items-center justify-between">
+                <dt class="text-stone-300">Mano de obra</dt>
+                <dd class="tabular-nums">{{ formatCurrency(selectedRecipeEstimate.laborCost) }}</dd>
+              </div>
+              <div class="flex items-center justify-between">
+                <dt class="text-stone-300">Margen sobre ingreso</dt>
+                <dd class="tabular-nums">{{ selectedRecipeEstimate.marginOnRevenue.toFixed(1) }}%</dd>
+              </div>
+            </dl>
+          </template>
+          <div v-else class="flex min-h-[220px] items-center justify-center text-center text-sm text-stone-400">
+            Selecciona una receta para ver la estimación de ganancia.
+          </div>
+        </div>
+      </div>
+
+      <TableRegister :records="productionRecords" :loading="dataLoading" @edit-record="openEditModal" @delete-record="handleDeleteRecord" />
+    </template>
+
+    <ConfirmationModal :show="showDeleteModal" eyebrow="Eliminar registro" title="¿Eliminar registro?"
+      :message="`¿Eliminar el registro de producción de '${recordToDelete?.productName || ''}'?`"
+      confirm-button-text="Sí, eliminar" @close="closeDeleteModal" @confirm="confirmDeleteRecord" />
+
+    <EditProductionModal :show="showEditModal" :record="editingRecord" @close="closeEditModal" @save="saveChanges" />
   </div>
 </template>

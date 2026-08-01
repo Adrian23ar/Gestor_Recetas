@@ -138,6 +138,9 @@ export const useUserDataStore = defineStore('userData', () => {
             operatingCostRecipeOnly: 'Gastos Op. (Ingr. + Emp.)',
             laborCostForBatch: 'Costo Mano de Obra (Lote)',
             isSold: 'Vendido',
+            calculatedRecipeOnlyCost: 'Costo Base de Receta (Calculado)',
+            calculatedTotalBatchCostAllIncluded: 'Costo Total del Lote (Calculado)',
+            calculatedFinalPrice: 'Precio Final (Calculado)',
             // Labels for ingredient changes (from getIngredientChangeDetails)
             'ingredient_removed': 'Ingrediente Eliminado',
             'ingredient_added': 'Ingrediente Añadido',

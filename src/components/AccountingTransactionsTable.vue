@@ -1,179 +1,79 @@
 <script setup>
-//src/components/AccountingTransactionsTable.vue
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import ResponsiveTable from './ui/ResponsiveTable.vue';
+import { useDataTable } from '../composables/useDataTable.js';
 import { formatCurrency } from '../utils/utils.js';
-import DataTable from 'datatables.net-vue3';
-import DataTablesCore from 'datatables.net-dt';
-import DataTablesResponsive from 'datatables.net-responsive-dt';
 
-DataTable.use(DataTablesCore);
-DataTable.use(DataTablesResponsive);
+const props = defineProps({
+    records: { type: Array, default: () => [] },
+    loading: { type: Boolean, default: false },
+});
+const emit = defineEmits(['edit-transaction', 'delete-transaction']);
 
-// Helper function to format currency (Bs.)
-function formatCurrencyBs(value) {
-    const num = Number(value);
-    return isNaN(num) ? 'Bs. 0.00' : `Bs. ${num.toFixed(2)}`;
-}
-
-// Helper function to format currency (USD)
-function formatCurrencyUsd(value) {
-    const num = Number(value);
-    return isNaN(num) ? '$0.00' : `$${num.toFixed(2)}`;
-}
-
-// Helper function to format date as DD/MM/YYYY
 function formatDate(dateString) {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Fecha Inválida';
-    // Use UTC methods to prevent timezone conversion issues
+    if (isNaN(date.getTime())) return 'Fecha inválida';
     const day = String(date.getUTCDate()).padStart(2, '0');
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
     const year = date.getUTCFullYear();
     return `${day}/${month}/${year}`;
 }
 
-const props = defineProps({ records: { type: Array, default: () => [] } });
-const emit = defineEmits(['edit-transaction', 'delete-transaction']);
+const { query, page, total, totalPages, rangeFrom, rangeTo, paged, next, prev } = useDataTable(
+    () => props.records,
+    { searchFields: ['description', 'category'], pageSize: 10, defaultSort: { key: 'date', dir: 'desc' } }
+);
 
-const dataTableRef = ref(null);
-let tableElement = null;
-let clickListener = null;
-
-const columns = computed(() => [
-    { // Columna 0: Fecha
-        title: 'Fecha', data: 'date',
-        render: (data) => formatDate(data)
-    },
-    { // Columna 1: Tipo
-        title: 'Tipo', data: 'type',
-        render: (data, type, row) => {
-            if (data === 'income') {
-                return `<span class="text-success-700 dark:text-success-400">Ingreso</span>`;
-            } else if (data === 'expense') {
-                return `<span class="text-danger-700 dark:text-danger-400">Egreso</span>`;
-            }
-            return data;
-        }
-    },
-    { // Columna 2: Descripción
-        title: 'Descripción', data: 'description'
-    },
-    { // Columna 3: Categoría
-        title: 'Categoría', data: 'category'
-    },
-    { // Columna 4: Monto (Bs.)
-        title: 'Monto (Bs.)', data: 'amountBs', className: 'text-right',
-        render: (data) => formatCurrency(data, 'Bs.')
-    },
-    { // Columna 5: Tasa (Bs/USD)
-        title: 'Tasa (Bs/USD)', data: 'exchangeRate', className: 'text-right',
-        render: (data) => (data ? Number(data).toFixed(2) : 'N/A')
-    },
-    { // Columna 6: Monto (USD)
-        title: 'Monto (USD)', data: 'amountUsd', className: 'text-right',
-        render: (data) => formatCurrency(data, '$')
-    },
-    { // Columna 7: Acciones
-        title: 'Acciones', data: null, orderable: false, searchable: false, responsivePriority: 1, className: 'text-center',
-        render: (data, type, row) => {
-            return `
-                <button data-action="edit" data-id="${row.id}" class="px-2 py-1 cursor-pointer bg-secondary-600 text-white text-xs font-medium rounded hover:bg-secondary-700 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-secondary-500 transition-all dark:bg-dark-secondary-500 dark:text-dark-text-base dark:hover:bg-dark-secondary-600 dark:focus:ring-dark-secondary-500 dark:focus:ring-offset-dark-contrast mr-2">
-                    Editar
-                </button>
-                <button data-action="delete" data-id="${row.id}" class="px-2 py-1 cursor-pointer bg-danger-600 text-white text-xs font-medium rounded hover:bg-danger-700 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-danger-500 transition-all dark:bg-danger-700 dark:text-dark-text-base dark:hover:bg-danger-800 dark:focus:ring-danger-600 dark:focus:ring-offset-dark-contrast">
-                    Eliminar
-                </button>
-            `;
-        }
-    }
-]);
-
-const options = {
-    responsive: true,
-    language: {
-        search: "_INPUT_",
-        searchPlaceholder: "Buscar transacción...",
-        info: "Mostrando _START_ a _END_ de _TOTAL_ transacciones",
-        infoEmpty: "No se encontraron transacciones",
-        infoFiltered: "(filtradas de un total de _MAX_ transacciones)",
-        lengthMenu: "Mostrar _MENU_ transacciones",
-        paginate: {
-            first: "Primero",
-            last: "Ultimo",
-            next: "Siguiente",
-            previous: "Anterior"
-        },
-        zeroRecords: "No se encontraron transacciones que coincidan",
-        emptyTable: "No hay transacciones registradas",
-        loadingRecords: "Cargando...",
-        processing: "Procesando...",
-    },
-    pageLength: 10,
-    lengthMenu: [10, 25, 50],
-    order: [[0, 'desc']], // Ordenar por Fecha (columna 0) descendente
-    // footerCallback removed as per requirements
-    columnDefs: [ // Added name properties for clarity, matching data properties
-        { name: 'date', targets: 0 },
-        { name: 'type', targets: 1 },
-        { name: 'description', targets: 2 },
-        { name: 'category', targets: 3 },
-        { name: 'amountBs', targets: 4 },
-        { name: 'exchangeRate', targets: 5 },
-        { name: 'amountUsd', targets: 6 },
-        { name: 'actions', targets: 7, orderable: false, searchable: false } // Ensure actions column is not orderable/searchable
-    ]
-};
-
-onMounted(() => {
-    if (dataTableRef.value?.$el) {
-        tableElement = dataTableRef.value.$el;
-
-        clickListener = (event) => {
-            const button = event.target.closest('button[data-action]');
-            if (!button) return;
-
-            const action = button.dataset.action;
-            const id = button.dataset.id;
-            // Find the transaction record by its ID. Ensure props.records is correctly populated.
-            const transactionData = props.records.find(rec => String(rec.id) === String(id));
-
-
-            if (action === 'edit') {
-                if (transactionData) emit('edit-transaction', transactionData);
-            } else if (action === 'delete') {
-                // For delete, we typically just need the ID.
-                if (transactionData) emit('delete-transaction', transactionData);
-            }
-        };
-        tableElement.addEventListener('click', clickListener);
-    }
-});
-
-onBeforeUnmount(() => {
-    if (tableElement && clickListener) {
-        tableElement.removeEventListener('click', clickListener);
-    }
-});
+const columns = [
+    { key: 'date', label: 'Fecha' },
+    { key: 'movement', label: 'Movimiento', mobilePrimary: true },
+    { key: 'category', label: 'Categoría' },
+    { key: 'amountBs', label: 'Monto (Bs.)', align: 'right' },
+    { key: 'exchangeRate', label: 'Tasa', align: 'right' },
+    { key: 'amountUsd', label: 'Monto (USD)', align: 'right' },
+];
 </script>
 
 <template>
-    <div class="datatable-container p-4">
-        <DataTable ref="dataTableRef" :data="records" :columns="columns" :options="options"
-            class="display wrap compact hover cell-border" width="100%">
-            <thead>
-                <tr>
-                    <th>Fecha</th>
-                    <th>Tipo</th>
-                    <th>Descripción</th>
-                    <th>Categoría</th>
-                    <th class="text-right">Monto (Bs.)</th>
-                    <th class="text-right">Tasa (Bs/USD)</th>
-                    <th class="text-right">Monto (USD)</th>
-                    <th class="text-center">Acciones</th>
-                </tr>
-            </thead>
-            <!-- tfoot removed as per requirements -->
-        </DataTable>
-    </div>
+    <ResponsiveTable :columns="columns" :rows="paged" row-key="id" :loading="loading"
+        :empty="{ title: 'Sin transacciones', message: 'No hay movimientos registrados para este periodo.' }"
+        noun="transacciones" :total="total" :range-from="rangeFrom" :range-to="rangeTo" :page="page"
+        :total-pages="totalPages" @next="next" @prev="prev">
+        <template #toolbar>
+            <h2 class="text-base font-semibold text-stone-800 dark:text-stone-100">Movimientos</h2>
+            <input v-model="query" type="search" placeholder="Buscar transacción…" class="ui-input-sm w-full max-w-[220px]" />
+        </template>
+
+        <template #cell-date="{ row }">{{ formatDate(row.date) }}</template>
+
+        <template #cell-movement="{ row }">
+            <div class="flex items-center gap-2">
+                <span :class="row.type === 'income' ? 'ui-badge-success' : 'ui-badge-danger'">
+                    {{ row.type === 'income' ? 'Ingreso' : 'Egreso' }}
+                </span>
+                <span class="truncate text-stone-800 dark:text-stone-100">{{ row.description }}</span>
+            </div>
+        </template>
+
+        <template #cell-category="{ row }">{{ row.category || '—' }}</template>
+
+        <template #cell-amountBs="{ row }">
+            <span class="tabular-nums">{{ formatCurrency(row.amountBs, 'Bs.') }}</span>
+        </template>
+
+        <template #cell-exchangeRate="{ row }">
+            <span class="tabular-nums">{{ row.exchangeRate ? Number(row.exchangeRate).toFixed(2) : 'N/A' }}</span>
+        </template>
+
+        <template #cell-amountUsd="{ row }">
+            <span class="tabular-nums" :class="row.type === 'expense' ? 'text-red-600 dark:text-red-400' : ''">
+                {{ row.type === 'expense' ? '−' : '' }}{{ formatCurrency(row.amountUsd, '$') }}
+            </span>
+        </template>
+
+        <template #actions="{ row }">
+            <button type="button" class="ui-btn-subtle" @click="emit('edit-transaction', row)">Editar</button>
+            <button type="button" class="ui-btn-danger-ghost" @click="emit('delete-transaction', row)">Eliminar</button>
+        </template>
+    </ResponsiveTable>
 </template>

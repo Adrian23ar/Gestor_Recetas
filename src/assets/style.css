@@ -4,18 +4,15 @@
 /* 2. Importar las capas de Tailwind (o usar @tailwind base; @tailwind components; @tailwind utilities;) */
 @import "tailwindcss";
 @import "@vueform/multiselect/themes/default.css"; /* <-- Añadir esta línea */
-@import "datatables.net-dt";
-@import "datatables.net-responsive-dt";
 
-/* 3. Estilos Base Globales (Opcional - Tailwind base ya hace mucho) */
+/* 3. Estilos Base Globales */
 body {
-  /* Aplicamos fondo y color de texto usando las CLASES que ahora usan nuestra config */
-  @apply bg-background text-text-base antialiased;
-  /* font-family se aplica por defecto por la config */
+  /* Fondo y color de texto centralizados aquí: App.vue no necesita repetirlos */
+  @apply bg-background text-text-base antialiased font-sans dark:bg-dark-background dark:text-dark-text-base;
   margin: 0;
 }
 
-/* 4. Estilos para Transiciones de Vue y Enlace Activo (Mantenemos) */
+/* 4. Transiciones de Vue compartidas por toda la app */
 .slide-fade-enter-active {
   transition: all 0.3s ease-out;
 }
@@ -37,131 +34,360 @@ body {
   opacity: 0;
   transform: translateY(30px) scale(0.95);
 }
-
-/* Asegura que el layout no salte bruscamente durante las animaciones de salida */
-/* Ajusta si causa problemas con tu grid específico */
 .card-list-leave-active {
-  /* position: absolute; */ /* Descomenta con precaución si el grid se rompe */
-  width: 100%; /* Ayuda a mantener el espacio */
+  width: 100%; /* Ayuda a mantener el espacio durante la salida */
 }
-
-/* Animación de movimiento cuando la lista se reordena (si aplica) */
 .card-list-move {
   transition: transform 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
-/* Aplica solo la transicion de opacidad al elemento envuelto por Transition (el backdrop div) */
+.fade-transition-enter-active,
+.fade-transition-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-transition-enter-from,
+.fade-transition-leave-to {
+  opacity: 0;
+}
+
+/* Transición de los 7 modales (todos los overlays salvo el drawer de receta).
+   INVARIANTE: la caja interior debe llevar la clase literal `modal-content`
+   y estar envuelta en <Transition name="modal-transition">. No renombrar. */
 .modal-transition-enter-active,
 .modal-transition-leave-active {
   transition: opacity 0.2s ease-out;
 }
-
-/* Define el estado inicial/final de opacidad para el elemento envuelto (el backdrop) */
 .modal-transition-enter-from,
 .modal-transition-leave-to {
   opacity: 0;
 }
-
-/* Ahora, aplica transiciones a la caja de contenido (el div interior) */
-/* Targeteamos el div con clase 'modal-content' cuando el padre tiene las clases de transicion */
 .modal-transition-enter-active .modal-content,
 .modal-transition-leave-active .modal-content {
   transition: transform 0.2s ease-out, opacity 0.2s ease-out;
 }
-
-/* Define el estado inicial/final para la caja de contenido */
 .modal-transition-enter-from .modal-content,
 .modal-transition-leave-to .modal-content {
-  opacity: 0; /* La caja de contenido tambien inicia/termina invisible */
-  transform: scale(0.95); /* Y inicia/termina ligeramente mas pequeña */
+  opacity: 0;
+  transform: scale(0.95);
 }
 
-/* --- Inicio Ajustes de Estilo para DataTables --- */
-
-/* Importar CSS de DataTables y Responsive */
-
-/* --- Ajustes de Estilo para Tailwind --- */
-
-.datatable-container {
-  @apply w-full text-sm;
+/* Transición del drawer de receta (RecipeDrawer, único overlay que entra/sale
+   deslizando desde la derecha en vez de escalar). Misma caja `modal-content`,
+   envuelta en <Transition name="drawer-transition"> en vez de modal-transition. */
+.drawer-transition-enter-active,
+.drawer-transition-leave-active {
+  transition: opacity 0.2s ease-out;
 }
-div.dt-container {
-  @apply bg-contrast rounded-lg border border-neutral-200 shadow-md p-4 dark:bg-dark-contrast dark:border-dark-neutral-700 dark:shadow-xl;
+.drawer-transition-enter-from,
+.drawer-transition-leave-to {
+  opacity: 0;
 }
-div.dt-layout-row {
-  @apply flex flex-wrap justify-between items-center gap-4 mb-3;
+.drawer-transition-enter-active .modal-content,
+.drawer-transition-leave-active .modal-content {
+  transition: transform 0.25s ease-out;
 }
-/* Input de búsqueda */
-div.dt-search input {
-  @apply px-3 py-1.5 border border-neutral-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 dark:border-dark-neutral-600 dark:bg-dark-neutral-800 dark:text-dark-text-base dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400;
-}
-div.dt-search label {
-  @apply hidden;
-}
-/* Info Paginación */
-div.dt-info {
-  @apply text-sm text-text-muted dark:text-dark-text-muted;
-}
-/* Paginación Botones */
-div.dt-paging {
-  @apply inline-flex items-center space-x-1;
-}
-button.dt-paging-button {
-  @apply px-3 py-1 border border-neutral-300 rounded-md text-sm cursor-pointer transition-colors duration-150 hover:bg-neutral-100 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-accent-500 dark:border-dark-neutral-600 dark:text-dark-text-muted dark:hover:bg-dark-neutral-700;
-}
-button.dt-paging-button.current {
-  @apply bg-accent-500 border-accent-500 text-white font-semibold cursor-default pointer-events-none dark:bg-dark-accent-400 dark:border-dark-accent-400 dark:text-dark-text-base;
-}
-button.dt-paging-button.disabled {
-  @apply opacity-50 cursor-not-allowed;
-}
-/* Tabla Estilos */
-table.dataTable {
-  @apply !w-full border-collapse my-0;
-}
-table.dataTable thead th {
-  @apply px-4 py-3 text-left text-xs font-medium text-text-muted uppercase tracking-wider bg-neutral-100 dark:bg-dark-neutral-800 dark:text-dark-text-muted border-b border-neutral-300 dark:border-dark-neutral-600;
-  background-image: none !important;
-}
-table.dataTable tbody tr {
-  @apply border-b border-neutral-200 dark:border-dark-neutral-700;
-}
-table.dataTable tbody tr:hover {
-  @apply bg-neutral-50 dark:bg-dark-neutral-800/50;
-}
-table.dataTable tbody td {
-  @apply px-4 py-3 whitespace-nowrap text-sm text-text-base dark:text-dark-text-base;
-}
-table.dataTable tbody td.dt-control {
-  @apply text-center cursor-pointer;
-}
-table.dataTable td:last-child {
-  @apply text-center;
-}
-/* Footer específico de TableRegister */
-table.dataTable tfoot th:nth-child(3) {
-  @apply text-success-700 dark:text-success-400;
-} /* Ganancia Neta */
-table.dataTable tfoot th:nth-child(1), /* Label */
- table.dataTable tfoot th:nth-child(2), /* Ingreso */
- table.dataTable tfoot th:nth-child(4), /* Capital */
- table.dataTable tfoot th:nth-child(5), /* Reinversion */
- table.dataTable tfoot th:nth-child(6) {
-  @apply text-text-base dark:text-dark-text-base;
-} /* Sueldo */
-table.dataTable tfoot th:nth-child(3) {
-  @apply text-text-base dark:text-dark-text-base;
-} /* Gastos */
-
-.input-filter-style {
-  @apply px-2 py-1 border border-neutral-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 dark:border-dark-neutral-700 dark:text-dark-text-base dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400 bg-contrast dark:bg-dark-contrast;
+.drawer-transition-enter-from .modal-content,
+.drawer-transition-leave-to .modal-content {
+  transform: translateX(100%);
 }
 
-.input-field-style {
-  @apply block w-full px-3 py-2 border border-neutral-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 sm:text-sm dark:border-dark-neutral-700 dark:text-dark-text-base dark:focus:ring-dark-accent-400 dark:focus:border-dark-accent-400 bg-contrast dark:bg-dark-contrast;
+/* 5. Foco global — inputs nativos que no pasan por .ui-input (ej. buscador de Multiselect,
+   <input type="date">). Los .ui-input/.ui-select/.ui-textarea llevan su propio focus:. */
+input:not([type="checkbox"]):not([type="radio"]):focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid rgba(225, 29, 72, 0.35) !important;
+  outline-offset: 1px;
+  border-color: #e11d48 !important;
 }
 
-.form-radio {
-    @apply focus:ring-accent-500 h-4 w-4 text-accent-600 border-neutral-300 dark:border-dark-neutral-600 dark:bg-dark-neutral-700 dark:focus:ring-dark-accent-400 dark:focus:ring-offset-dark-contrast;
+/* =========================================================================
+   6. CATÁLOGO DE CLASES .ui-*  (ver REDISENO-GUIA.md §6)
+   Única fuente de las variantes dark:. Ninguna vista debe escribir dark: a mano.
+   ========================================================================= */
+
+/* --- Título de vista --- */
+.ui-h1 {
+  @apply text-[40px] leading-[1.05] font-extrabold tracking-[-0.02em] text-stone-800 dark:text-stone-100 max-[980px]:text-[32px] max-[640px]:text-[28px];
+}
+
+/* --- Superficies --- */
+.ui-card {
+  @apply rounded-card bg-white shadow-raised dark:bg-stone-800;
+}
+.ui-card-flat {
+  @apply rounded-card bg-white shadow-card dark:bg-stone-800;
+}
+.ui-panel {
+  @apply rounded-box bg-stone-50 dark:bg-stone-900/60;
+}
+.ui-card-inverted {
+  @apply rounded-card bg-stone-800 text-stone-50 dark:bg-stone-950 dark:text-stone-100;
+}
+.ui-card-inverted-divider {
+  @apply border-stone-700 dark:border-stone-800;
+}
+.ui-stat {
+  @apply rounded-panel bg-white p-5 shadow-card dark:bg-stone-800;
+}
+.ui-stat-tile {
+  @apply rounded-tile bg-white p-5 shadow-card dark:bg-stone-800;
+}
+
+/* --- Controles --- */
+.ui-label {
+  @apply mb-1.5 block text-xs font-semibold text-stone-600 dark:text-stone-300;
+}
+.ui-input,
+.ui-select,
+.ui-textarea {
+  @apply w-full rounded-field border border-stone-200 bg-white px-3.5 py-3 text-sm text-stone-800 placeholder:text-stone-400 transition-colors focus:border-accent-600 focus:outline-2 focus:outline-offset-1 focus:outline-accent-600/35 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:placeholder:text-stone-500;
+}
+.ui-input-sm {
+  @apply rounded-control border border-stone-200 bg-white px-3 py-[9px] text-[13px] text-stone-800 placeholder:text-stone-400 transition-colors focus:border-accent-600 focus:outline-2 focus:outline-offset-1 focus:outline-accent-600/35 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:placeholder:text-stone-500;
+}
+.ui-input-error {
+  @apply border-red-300 bg-red-50 dark:border-red-500/40 dark:bg-red-500/10;
+}
+
+/* --- Botones --- */
+.ui-btn-primary {
+  @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-field bg-accent-600 px-5 py-3 text-sm font-semibold text-white shadow-cta transition-colors hover:bg-accent-700 dark:bg-accent-500 dark:hover:bg-accent-600;
+}
+.ui-btn-dark {
+  @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-field bg-stone-800 px-5 py-3 text-sm font-semibold text-stone-50 transition-colors hover:bg-stone-700 dark:bg-stone-700 dark:hover:bg-stone-600;
+}
+.ui-btn-outline {
+  @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-control border border-stone-200 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 transition-colors hover:border-stone-300 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700;
+}
+.ui-btn-subtle {
+  @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-stone-200 bg-surface-muted px-3 py-2 text-[13px] font-semibold text-stone-700 transition-colors hover:border-stone-300 hover:bg-white dark:border-stone-700 dark:bg-stone-900/60 dark:text-stone-200 dark:hover:bg-stone-800;
+}
+.ui-btn-ghost {
+  @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-control px-3 py-2 text-[13px] font-semibold text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200;
+}
+.ui-btn-danger-ghost {
+  @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-control px-3 py-2 text-[13px] font-semibold text-stone-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-stone-400 dark:hover:bg-red-500/10 dark:hover:text-red-400;
+}
+.ui-btn-disabled {
+  @apply inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-field bg-stone-100 px-5 py-3 text-sm font-semibold text-stone-400 dark:bg-stone-800 dark:text-stone-600;
+}
+
+/* --- Píldoras y navegación --- */
+.ui-chip {
+  @apply inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-stone-600 transition-colors hover:border-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300;
+}
+.ui-chip-active {
+  @apply inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-stone-800 bg-stone-800 px-3.5 py-1.5 text-xs font-semibold text-stone-50 dark:border-stone-600 dark:bg-stone-600 dark:text-stone-50;
+}
+
+.ui-badge-success {
+  @apply inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400;
+}
+.ui-badge-warning {
+  @apply inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400;
+}
+.ui-badge-danger {
+  @apply inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700 dark:bg-red-500/10 dark:text-red-400;
+}
+.ui-badge-neutral {
+  @apply inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold text-stone-600 dark:bg-stone-700 dark:text-stone-300;
+}
+
+.ui-seg-track {
+  @apply inline-flex items-center gap-1 rounded-control bg-stone-100 p-1 dark:bg-stone-900/60;
+}
+.ui-seg {
+  @apply cursor-pointer rounded-chip px-3.5 py-1.5 text-xs font-semibold text-stone-500 transition-colors hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200;
+}
+.ui-seg-active {
+  @apply cursor-pointer rounded-chip bg-white px-3.5 py-1.5 text-xs font-semibold text-stone-800 shadow-pill dark:bg-stone-700 dark:text-stone-50;
+}
+
+.ui-nav-track {
+  @apply inline-flex items-center gap-1 rounded-field bg-stone-100 p-1 dark:bg-stone-900/60;
+}
+.ui-nav-pill {
+  @apply rounded-chip px-4 py-2 text-sm font-semibold text-stone-500 transition-colors hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200;
+}
+.ui-nav-pill-active {
+  @apply rounded-chip bg-white px-4 py-2 text-sm font-semibold text-stone-800 shadow-pill dark:bg-stone-700 dark:text-stone-50;
+}
+
+/* --- Tabla --- */
+.ui-table {
+  @apply w-full min-w-[640px] border-collapse;
+}
+.ui-thead-th {
+  @apply whitespace-nowrap bg-surface-muted px-4 py-[13px] text-left text-xs font-medium text-stone-400 dark:bg-stone-900/60 dark:text-stone-500;
+}
+.ui-thead-th:first-child,
+.ui-thead-th:last-child {
+  @apply px-[22px];
+}
+.ui-td {
+  @apply px-4 py-4 text-sm text-stone-800 dark:text-stone-100;
+}
+.ui-td:first-child,
+.ui-td:last-child {
+  @apply px-[22px];
+}
+.ui-tr {
+  @apply border-t border-stone-100 transition-colors hover:bg-surface-muted dark:border-stone-800 dark:hover:bg-stone-900/60;
+}
+.ui-table-toolbar {
+  @apply flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-[22px] py-5 dark:border-stone-700;
+}
+.ui-table-footer {
+  @apply flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 px-[22px] py-4 dark:border-stone-700;
+}
+
+/* --- Overlays ---
+   .ui-backdrop no incluye centrado propio: cada uso añade `flex items-center
+   justify-center p-4` (modales) o `flex justify-end` (drawer) para evitar
+   pelear con `important:true` de Tailwind si algún día se necesita otra variante. */
+.ui-backdrop {
+  @apply fixed inset-0 z-[60] bg-[rgba(28,25,23,.45)] dark:bg-black/60;
+}
+/* animate-riseIn / animate-slideIn se añaden como clase literal en el template
+   (junto a modal-content): @apply no resuelve utilidades animate-* custom
+   definidas vía @config en Tailwind v4. */
+.ui-modal-box {
+  @apply w-full rounded-card bg-white p-[26px] shadow-modal dark:bg-stone-800;
+}
+.ui-drawer {
+  @apply flex h-full w-full max-w-[760px] flex-col rounded-l-card bg-white shadow-drawer dark:bg-stone-800 max-[640px]:max-w-full max-[640px]:rounded-none;
+}
+
+/* --- Estado --- */
+/* animate-shimmer se añade como clase literal en el template (misma razón que arriba) */
+.ui-skeleton {
+  @apply rounded-lg bg-stone-100 dark:bg-stone-700/50;
+}
+.ui-empty {
+  @apply flex flex-col items-center justify-center rounded-card border border-dashed border-stone-300 px-8 py-16 text-center dark:border-stone-600;
+}
+
+/* =========================================================================
+   7. vue-toastification — píldora oscura, abajo a la derecha
+   ========================================================================= */
+.Vue-Toastification__toast {
+  align-items: center !important;
+  min-height: 0 !important;
+  border-radius: 16px !important;
+  background: #292524 !important;
+  color: #fafaf9 !important;
+  box-shadow: 0 20px 40px -18px rgba(28, 25, 23, 0.7) !important;
+  padding: 14px 18px !important;
+  font-family: inherit !important;
+}
+.Vue-Toastification__toast-body {
+  padding: 0 !important;
+  font-size: 14px;
+  font-weight: 500;
+}
+.Vue-Toastification__toast--success {
+  border-left: 3px solid #34d399;
+}
+.Vue-Toastification__toast--error {
+  border-left: 3px solid #f87171;
+}
+.Vue-Toastification__toast--warning {
+  border-left: 3px solid #fcd34d;
+}
+.Vue-Toastification__toast--info,
+.Vue-Toastification__toast--default {
+  border-left: 3px solid #a8a29e;
+}
+.Vue-Toastification__progress-bar {
+  background-color: rgba(250, 250, 249, 0.35) !important;
+}
+.Vue-Toastification__close-button {
+  color: #fafaf9 !important;
+  opacity: 0.6;
+}
+.Vue-Toastification__close-button:hover {
+  opacity: 1;
+}
+@media (max-width: 980px) {
+  .Vue-Toastification__container.bottom-right,
+  .Vue-Toastification__container.bottom-left,
+  .Vue-Toastification__container.bottom-center {
+    bottom: 86px !important;
+    left: 16px !important;
+    right: 16px !important;
+  }
+}
+
+/* =========================================================================
+   8. @vuepic/vue-datepicker — reemplaza los <input type="date"> nativos
+   (src/components/ui/DateField.vue). Se tematiza vía las custom properties
+   --dp-* que expone la librería.
+   IMPORTANTE — dos problemas distintos, dos razones para el !important:
+   1. La librería aplica su propia clase .dp--theme-light al MISMO elemento
+      (según su prop `dark`, que no usamos — siempre es light). Una regla en
+      el propio elemento SIEMPRE pisa un valor heredado de un ancestro como
+      :root/.dark, sin importar cuán específica sea la regla del ancestro —
+      por eso no basta con ".dark { --dp-x: ... }", hay que apuntar a
+      ".dark .dp--theme-light" directamente.
+   2. El CSS de la librería (dist/main.css) se importa desde DateField.vue,
+      que Vite empaqueta como chunk aparte — su orden de carga respecto a
+      este archivo no está garantizado. Sin !important, un empate de
+      especificidad (:root vs :root, .dp--theme-light vs .dp--theme-light)
+      lo decide el orden de carga, no esta regla — por eso todo lleva !important.
+   ========================================================================= */
+:root {
+  --dp-font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif !important;
+  --dp-border-radius: 14px !important;
+  --dp-cell-border-radius: 10px !important;
+  --dp-font-size: 14px !important;
+  --dp-input-padding: 11px 14px !important;
+  --dp-menu-shadow: 0 30px 60px -20px rgba(28, 25, 23, 0.5) !important;
+}
+.dp--theme-light {
+  --dp-background-color: #ffffff !important;
+  --dp-text-color: #292524 !important;
+  --dp-hover-color: #f5f5f4 !important;
+  --dp-hover-text-color: #292524 !important;
+  --dp-hover-icon-color: #78716c !important;
+  --dp-primary-color: #e11d48 !important;
+  --dp-primary-text-color: #ffffff !important;
+  --dp-secondary-color: #a8a29e !important;
+  --dp-border-color: #e7e5e4 !important;
+  --dp-menu-border-color: #e7e5e4 !important;
+  --dp-border-color-hover: #d6d3d1 !important;
+  --dp-disabled-color: #f5f5f4 !important;
+  --dp-disabled-color-text: #d6d3d1 !important;
+  --dp-icon-color: #a8a29e !important;
+  --dp-danger-color: #dc2626 !important;
+  --dp-highlight-color: rgba(225, 29, 72, 0.1) !important;
+}
+.dark .dp--theme-light {
+  --dp-background-color: #292524 !important;
+  --dp-text-color: #f5f5f4 !important;
+  --dp-hover-color: #44403c !important;
+  --dp-hover-text-color: #f5f5f4 !important;
+  --dp-hover-icon-color: #d6d3d1 !important;
+  --dp-primary-color: #f43f5e !important;
+  --dp-primary-text-color: #ffffff !important;
+  --dp-secondary-color: #78716c !important;
+  --dp-border-color: #44403c !important;
+  --dp-menu-border-color: #44403c !important;
+  --dp-border-color-hover: #57534e !important;
+  --dp-disabled-color: #292524 !important;
+  --dp-disabled-color-text: #57534e !important;
+  --dp-icon-color: #78716c !important;
+  --dp-highlight-color: rgba(244, 63, 94, 0.15) !important;
+}
+.ui-date-sm {
+  --dp-input-padding: 7px 12px !important;
+  --dp-font-size: 13px !important;
+  --dp-border-radius: 12px !important;
+}
+.ui-date-error {
+  --dp-border-color: #fca5a5 !important;
+}
+.dark .ui-date-error {
+  --dp-border-color: rgba(239, 68, 68, 0.4) !important;
 }
 
