@@ -5,6 +5,11 @@ import { useAccountingDataStore } from '../stores/accountingData';
 import DateField from './ui/DateField.vue';
 import { storeToRefs } from 'pinia';
 import { useToast } from 'vue-toastification';
+import Multiselect from '@vueform/multiselect';
+import { multiselectTheme } from '../utils/multiselectTheme.js';
+import { CURRENCIES, DEFAULT_CURRENCY, currencySymbol, requiredRateKeys, toUsdBcv } from '../utils/currency.js';
+
+const currencyOptions = CURRENCIES.map(c => ({ value: c.code, label: `${c.code} · ${c.name}` }));
 
 const props = defineProps({
     show: { type: Boolean, required: true },
@@ -20,7 +25,7 @@ const { specificDateRateError } = storeToRefs(accountingStore);
 
 // Acciones (funciones)
 const {
-    getRateForExactDate,
+    getRatesForExactDate,
     getLatestRateDataBefore,
     fetchRateForSpecificDateFromAPI,
     updateDailyRate
@@ -31,7 +36,16 @@ const showStaleRateChoice = ref(false);
 const staleRateInfo = ref(null);
 
 const showManualRateInput = ref(false);
-const manualRateInput = ref(null);
+// Un input por tasa: si el movimiento va en EUR o USDT hacen falta DOS tasas
+// (la propia de la moneda y la del BCV, que es el denominador de la unidad
+// canónica), así que la carga manual no puede ser un solo campo.
+const manualRateInputs = ref({ bcv: null, eur: null, binance: null });
+
+const RATE_META = {
+    bcv: { label: 'Tasa BCV (Bs. por USD)', unit: 'Bs/USD' },
+    eur: { label: 'Tasa BCV (Bs. por EUR)', unit: 'Bs/EUR' },
+    binance: { label: 'Tasa USDT (Bs. por USDT)', unit: 'Bs/USDT' },
+};
 
 const defaultFormData = () => {
     const now = new Date();
@@ -46,15 +60,16 @@ const defaultFormData = () => {
         date: localTodayString,
         description: '',
         category: '',
-        amountBs: null,
-        exchangeRate: null,
-        amountUsd: 0,
+        amountOriginal: null,
+        currencyOriginal: DEFAULT_CURRENCY,
         notes: '',
     };
 };
 
 const formData = ref(defaultFormData());
-const applicableRate = ref(null);
+// Juego de tasas resuelto para la fecha elegida. Reemplaza al `applicableRate`
+// suelto de cuando todo era en bolívares.
+const applicableRates = ref(null);
 const rateErrorMessageForModal = ref('');
 const isRateLoadingInModal = ref(false);
 const actualDateOfRate = ref(null);
@@ -71,13 +86,14 @@ watch(() => props.show, async (newShow) => {
         if (specificDateRateError) specificDateRateError.value = null;
         isRateLoadingInModal.value = false;
         showManualRateInput.value = false;
-        manualRateInput.value = null;
+        manualRateInputs.value = { bcv: null, eur: null, binance: null };
         showStaleRateChoice.value = false;
         staleRateInfo.value = null;
 
         if (props.transactionData) {
             formData.value = JSON.parse(JSON.stringify(props.transactionData));
-            formData.value.amountBs = Number(formData.value.amountBs);
+            formData.value.amountOriginal = Number(formData.value.amountOriginal);
+            formData.value.currencyOriginal = formData.value.currencyOriginal || DEFAULT_CURRENCY;
             if (formData.value.date) {
                 await attemptFetchRateForSelectedDate(formData.value.date, true);
             }
@@ -91,7 +107,7 @@ watch(() => props.show, async (newShow) => {
     } else {
         // Limpieza completa al cerrar
         formData.value = defaultFormData();
-        applicableRate.value = null;
+        applicableRates.value = null;
         rateErrorMessageForModal.value = '';
         isRateLoadingInModal.value = false;
         actualDateOfRate.value = null;
@@ -107,33 +123,33 @@ watch(() => formData.value.date, (newDate, oldDate) => {
 
     if (newDate && newDate !== oldDate) {
         showManualRateInput.value = false;
-        manualRateInput.value = null;
+        manualRateInputs.value = { bcv: null, eur: null, binance: null };
         showStaleRateChoice.value = false;
         staleRateInfo.value = null;
         actualDateOfRate.value = null;
-        applicableRate.value = null;
+        applicableRates.value = null;
         isRateLoadingInModal.value = true;
         rateErrorMessageForModal.value = '';
         dateChangeDebounceTimer.value = setTimeout(async () => {
             await attemptFetchRateForSelectedDate(newDate, false);
         }, 500);
     } else if (!newDate) {
-        applicableRate.value = null;
-        formData.value.exchangeRate = null;
-        formData.value.amountUsd = 0;
+        applicableRates.value = null;
         actualDateOfRate.value = null;
         rateErrorMessageForModal.value = 'Selecciona una fecha válida.';
         isRateLoadingInModal.value = false;
     }
 });
 
-// Cascada de resolución de tasa: API -> exacta guardada -> anterior con elección -> manual.
-// INVARIANTE: no tocar esta lógica, sólo el maquetado del modal.
+// Cascada de resolución de tasas: API -> exactas guardadas -> anteriores con
+// elección -> manual. INVARIANTE: conservar los cuatro escalones y su orden.
+// Lo único que cambió con la multimoneda es QUÉ se resuelve: antes un número
+// (la del BCV), ahora el juego {bcv, eur, binance}.
 async function attemptFetchRateForSelectedDate(selectedDate) {
     isRateLoadingInModal.value = true;
     rateErrorMessageForModal.value = '';
     actualDateOfRate.value = null;
-    applicableRate.value = null;
+    applicableRates.value = null;
     showManualRateInput.value = false;
     showStaleRateChoice.value = false;
     staleRateInfo.value = null;
@@ -141,16 +157,16 @@ async function attemptFetchRateForSelectedDate(selectedDate) {
 
     // 1. Intento API
     const apiResult = await fetchRateForSpecificDateFromAPI(selectedDate);
-    if (apiResult && apiResult.rate) {
-        applyRate(apiResult.rate, apiResult.dateFound, `Tasa de API para ${formatDate(apiResult.dateFound)} aplicada.`);
+    if (apiResult && apiResult.rates && apiResult.rates.bcv) {
+        applyRates(apiResult.rates, apiResult.dateFound, `Tasas de API para ${formatDate(apiResult.dateFound)} aplicadas.`);
         isRateLoadingInModal.value = false;
         return;
     }
 
     // 2. Fallo API -> Intento Local Exacto
-    const exactRate = getRateForExactDate(selectedDate);
-    if (exactRate) {
-        applyRate(exactRate, selectedDate, "API no disponible. Se usó la tasa guardada para esta fecha.");
+    const exactRates = getRatesForExactDate(selectedDate);
+    if (exactRates && exactRates.bcv) {
+        applyRates(exactRates, selectedDate, "API no disponible. Se usaron las tasas guardadas para esta fecha.");
         isRateLoadingInModal.value = false;
         return;
     }
@@ -172,8 +188,8 @@ async function attemptFetchRateForSelectedDate(selectedDate) {
 
 function handleUseStaleRate() {
     if (staleRateInfo.value) {
-        const { rate, date } = staleRateInfo.value;
-        applyRate(rate, date, `Tasa obsoleta del ${formatDate(date)} aplicada.`);
+        const { rates, date } = staleRateInfo.value;
+        applyRates(rates, date, `Tasas del ${formatDate(date)} aplicadas.`);
         showStaleRateChoice.value = false;
         rateErrorMessageForModal.value = '';
     }
@@ -181,30 +197,42 @@ function handleUseStaleRate() {
 
 function handleEnterManualInstead() {
     showStaleRateChoice.value = false;
-    rateErrorMessageForModal.value = "Por favor, ingrese una tasa para el " + formatDate(formData.value.date);
+    rateErrorMessageForModal.value = "Por favor, ingrese las tasas para el " + formatDate(formData.value.date);
     showManualRateInput.value = true;
 }
 
-function applyRate(rate, dateFound, message = '') {
-    applicableRate.value = rate;
-    formData.value.exchangeRate = rate;
+function applyRates(rates, dateFound, message = '') {
+    applicableRates.value = { ...rates };
     actualDateOfRate.value = dateFound;
-    recalculateUsd();
     if (message) toast.success(message, { timeout: 4000 });
 }
 
-async function applyManualRate() {
-    const rate = Number(manualRateInput.value);
-    if (!rate || rate <= 0) {
-        toast.error("Por favor, ingrese un número positivo para la tasa.");
-        return;
+// Tasas que le faltan a la moneda elegida. Es lo que decide si se puede guardar
+// y qué inputs muestra la carga manual.
+const missingRateKeys = computed(() => {
+    const rates = applicableRates.value || {};
+    return requiredRateKeys(formData.value.currencyOriginal)
+        .filter(key => !(Number(rates[key]) > 0));
+});
+
+async function applyManualRates() {
+    const entered = {};
+    for (const key of missingRateKeys.value) {
+        const value = Number(manualRateInputs.value[key]);
+        if (!value || value <= 0) {
+            toast.error(`Ingresa un número positivo para la ${RATE_META[key].unit}.`);
+            return;
+        }
+        entered[key] = value;
     }
-    applyRate(rate, formData.value.date, `Tasa manual (${rate}) aplicada.`);
+    if (Object.keys(entered).length === 0) return;
+
+    applyRates({ ...(applicableRates.value || {}), ...entered }, formData.value.date, 'Tasas manuales aplicadas.');
     showManualRateInput.value = false;
     rateErrorMessageForModal.value = '';
-    manualRateInput.value = null;
+    manualRateInputs.value = { bcv: null, eur: null, binance: null };
 
-    await updateDailyRate(rate, formData.value.date);
+    await updateDailyRate(entered, formData.value.date);
 }
 
 function formatDate(dateString) {
@@ -212,20 +240,6 @@ function formatDate(dateString) {
     const date = new Date(dateString + 'T00:00:00');
     return date.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
-
-function recalculateUsd() {
-    if (formData.value.amountBs && applicableRate.value && applicableRate.value > 0) {
-        formData.value.amountUsd = formData.value.amountBs / applicableRate.value;
-    } else {
-        formData.value.amountUsd = 0;
-    }
-}
-
-watch(() => formData.value.amountBs, () => {
-    if (applicableRate.value) {
-        recalculateUsd();
-    }
-});
 
 const closeModal = () => {
     clearTimeout(dateChangeDebounceTimer.value);
@@ -237,33 +251,41 @@ const save = () => {
         toast.warning("La descripción no puede estar vacía.");
         return;
     }
-    if (!formData.value.amountBs || formData.value.amountBs <= 0) {
-        toast.warning("El monto en Bs. debe ser mayor a cero.");
+    if (!formData.value.amountOriginal || formData.value.amountOriginal <= 0) {
+        toast.warning("El monto debe ser mayor a cero.");
         return;
     }
-    if (!applicableRate.value || applicableRate.value <= 0) {
-        toast.error(rateErrorMessageForModal.value || "Falta la tasa de cambio o es inválida para la fecha seleccionada.");
+    if (missingRateKeys.value.length > 0) {
+        toast.error(rateErrorMessageForModal.value || `Faltan tasas para registrar en ${formData.value.currencyOriginal}.`);
         return;
     }
-    const dataToSave = {
-        ...formData.value,
-        exchangeRate: applicableRate.value,
-        amountUsd: parseFloat(amountUsdDisplay.value)
-    };
-    emit('save', dataToSave);
+    // El juego de tasas viaja aparte del formulario: el store lo usa para
+    // calcular amountUsdBcv y para guardar el snapshot, no se persiste tal cual.
+    emit('save', { ...formData.value, rates: { ...(applicableRates.value || {}) } });
 };
 
-const amountUsdDisplay = computed(() => {
-    if (formData.value.amountBs && applicableRate.value && applicableRate.value > 0) {
-        return (formData.value.amountBs / applicableRate.value).toFixed(2);
-    }
-    return '0.00';
+// Equivalente en la unidad canónica (USD a tasa BCV) del monto que se está
+// cargando. null = falta alguna tasa; no se muestra 0, que sería mentira.
+const amountUsdBcv = computed(() =>
+    toUsdBcv(formData.value.amountOriginal, formData.value.currencyOriginal, applicableRates.value || {})
+);
+
+const amountUsdDisplay = computed(() =>
+    amountUsdBcv.value === null ? '—' : amountUsdBcv.value.toFixed(2)
+);
+
+// Tasas que SÍ se están usando para este movimiento, para mostrarlas al usuario.
+const usedRates = computed(() => {
+    const rates = applicableRates.value || {};
+    return requiredRateKeys(formData.value.currencyOriginal)
+        .filter(key => Number(rates[key]) > 0)
+        .map(key => ({ key, unit: RATE_META[key].unit, value: Number(rates[key]) }));
 });
 
 // INVARIANTE: no simplificar — el submit debe seguir deshabilitado en cualquiera de estos casos.
 const isSubmitDisabled = computed(() =>
-    isRateLoadingInModal.value || showStaleRateChoice.value || !applicableRate.value ||
-    !formData.value.amountBs || formData.value.amountBs <= 0 || !formData.value.date || !formData.value.description
+    isRateLoadingInModal.value || showStaleRateChoice.value || missingRateKeys.value.length > 0 ||
+    !formData.value.amountOriginal || formData.value.amountOriginal <= 0 || !formData.value.date || !formData.value.description
 );
 </script>
 
@@ -316,33 +338,70 @@ const isSubmitDisabled = computed(() =>
                             placeholder="Ej: Venta torta, Compra harina" class="ui-input" />
                     </div>
 
+                    <!-- Monto y moneda van en celdas de una grilla, no en un flex con anchos
+                         a medida: tanto `.ui-input` como el tema compartido de Multiselect
+                         traen `w-full`, y con important:true ningún ancho por-uso puede
+                         ganarles (gotcha #1) — los dos pedían el 100% y se desbordaban.
+                         En una grilla el ancho completo de la celda es justo lo correcto. -->
                     <div>
-                        <label class="ui-label" for="tx-amount-bs">Monto (Bs.)</label>
-                        <input id="tx-amount-bs" v-model.number="formData.amountBs" type="number" required min="0.01" step="0.01" class="ui-input" />
+                        <div class="grid grid-cols-2 gap-3 max-[640px]:grid-cols-1">
+                            <div>
+                                <label class="ui-label" for="tx-amount">Monto</label>
+                                <input id="tx-amount" v-model.number="formData.amountOriginal" type="number" required min="0.01" step="0.01"
+                                    placeholder="Ej: 1500" class="ui-input" />
+                            </div>
+                            <div>
+                                <label class="ui-label" for="tx-currency">Moneda</label>
+                                <Multiselect id="tx-currency" v-model="formData.currencyOriginal" :options="currencyOptions"
+                                    :searchable="false" :canClear="false" :canDeselect="false" :classes="multiselectTheme" />
+                            </div>
+                        </div>
+                        <p class="mt-1.5 text-xs text-stone-400">
+                            El monto se guarda tal cual lo escribes. El equivalente de abajo es lo que se usa para totalizar.
+                        </p>
                     </div>
 
                     <div class="ui-panel space-y-3 p-4">
                         <div>
                             <p class="ui-label !mb-1">Equivale a</p>
                             <p class="text-[24px] font-semibold tabular-nums tracking-[-0.02em] text-stone-800 dark:text-stone-100">
-                                ${{ amountUsdDisplay }}
+                                <template v-if="isRateLoadingInModal">…</template>
+                                <template v-else>${{ amountUsdDisplay }}</template>
                             </p>
-                            <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">
-                                Tasa:
-                                <span class="tabular-nums font-medium text-stone-700 dark:text-stone-300">
-                                    {{ applicableRate ? applicableRate.toFixed(2) : (isRateLoadingInModal ? 'Buscando…' : 'N/A') }}
+                            <p v-if="usedRates.length > 0" class="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                                <span v-for="(rate, i) in usedRates" :key="rate.key">
+                                    <template v-if="i > 0"> · </template>
+                                    {{ rate.unit }}
+                                    <span class="tabular-nums font-medium text-stone-700 dark:text-stone-300">{{ rate.value.toFixed(2) }}</span>
                                 </span>
-                                <span v-if="actualDateOfRate && actualDateOfRate !== formData.date && applicableRate">
-                                    (BCV del {{ formatDate(actualDateOfRate) }})
+                                <span v-if="actualDateOfRate && actualDateOfRate !== formData.date">
+                                    (del {{ formatDate(actualDateOfRate) }})
                                 </span>
                             </p>
+                            <p v-else-if="formData.currencyOriginal === 'USD'" class="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                                Los movimientos en dólares no necesitan conversión.
+                            </p>
+                        </div>
+
+                        <div v-if="missingRateKeys.length > 0 && !isRateLoadingInModal && !showStaleRateChoice && !showManualRateInput"
+                            class="rounded-box border border-red-200 bg-red-50 p-3 dark:border-red-500/25 dark:bg-red-500/10">
+                            <p class="text-xs text-red-700 dark:text-red-400">
+                                Falta la
+                                <template v-for="(key, i) in missingRateKeys" :key="key">
+                                    <template v-if="i > 0"> y la </template>{{ RATE_META[key].unit }}
+                                </template>
+                                para esta fecha. Sin eso no se puede convertir un movimiento en {{ formData.currencyOriginal }}.
+                            </p>
+                            <button type="button" @click.prevent="showManualRateInput = true" class="ui-btn-subtle mt-2">
+                                Ingresar manualmente
+                            </button>
                         </div>
 
                         <div v-if="showStaleRateChoice" class="rounded-box border border-amber-200 bg-amber-50 p-3 text-center dark:border-amber-500/25 dark:bg-amber-500/10">
                             <p class="text-xs text-amber-800 dark:text-amber-300">{{ rateErrorMessageForModal }}</p>
                             <div class="mt-2 flex flex-wrap justify-center gap-2">
                                 <button type="button" @click.prevent="handleUseStaleRate" class="ui-btn-subtle">
-                                    Usar esta tasa ({{ staleRateInfo.rate }})
+                                    Usar esas tasas
                                 </button>
                                 <button type="button" @click.prevent="handleEnterManualInstead" class="ui-btn-outline">
                                     Ingresar manualmente
@@ -350,12 +409,14 @@ const isSubmitDisabled = computed(() =>
                             </div>
                         </div>
 
-                        <div v-if="showManualRateInput && !isRateLoadingInModal && !showStaleRateChoice" class="flex items-center gap-2">
-                            <input v-model.number="manualRateInput" type="number" placeholder="Tasa manual para esta fecha" min="0" step="any"
-                                class="ui-input-sm flex-1" />
-                            <button type="button" @click.prevent="applyManualRate" :disabled="!manualRateInput || manualRateInput <= 0"
-                                class="cursor-pointer rounded-control bg-accent-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-accent-700 disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-400 dark:bg-accent-500 dark:hover:bg-accent-600 dark:disabled:bg-stone-700 dark:disabled:text-stone-500">
-                                Aplicar
+                        <div v-if="showManualRateInput && !isRateLoadingInModal && !showStaleRateChoice" class="space-y-2">
+                            <div v-for="key in missingRateKeys" :key="key">
+                                <label class="ui-label !mb-1" :for="`tx-manual-rate-${key}`">{{ RATE_META[key].label }}</label>
+                                <input :id="`tx-manual-rate-${key}`" v-model.number="manualRateInputs[key]" type="number"
+                                    :placeholder="`Ej: 748,79`" min="0" step="any" class="ui-input-sm w-full" />
+                            </div>
+                            <button type="button" @click.prevent="applyManualRates" class="ui-btn-subtle">
+                                Aplicar tasas
                             </button>
                         </div>
                     </div>

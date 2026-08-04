@@ -21,10 +21,16 @@ monitorizar tasas de cambio. Toda la interfaz está en español (Venezuela).
     * Descuento automático del stock de ingredientes utilizados (y restauración al eliminar el
       registro).
     * Cálculo de ingresos totales, costos de producción y ganancia neta por lote.
-* **Módulo de Contabilidad:**
-    * Registro de transacciones de ingresos y egresos en Bs. con su equivalente en USD.
-    * Gestión de tasas de cambio diarias, con obtención automática de la tasa del BCV y carga
-      manual como alternativa.
+* **Módulo de Contabilidad (multimoneda):**
+    * Registro de transacciones de ingresos y egresos en **Bs. (VES), USD, EUR o USDT**, mezcladas
+      libremente. Cada movimiento conserva el monto y la moneda tal como se cargaron.
+    * Para poder totalizar monedas distintas, todo se guarda además convertido a una unidad
+      común (dólares a tasa BCV), junto con las tasas del momento: un movimiento viejo no cambia
+      de valor aunque la tasa de hoy sea otra.
+    * Selector para leer los totales (ingresos, egresos y saldo neto) en cualquiera de las cuatro
+      monedas, en vivo.
+    * Gestión de tasas de cambio diarias (Bs/USD, Bs/EUR y Bs/USDT), con obtención automática y
+      carga manual como alternativa.
     * Filtrado y resumen de transacciones por periodo y tipo.
 * **Historial de Eventos:**
     * Registro detallado de acciones importantes (creación, edición y eliminación de recetas,
@@ -99,6 +105,7 @@ mi-pasteleria-app/
 │   │   └── accountingData.js  # Transacciones y tasas de cambio
 │   ├── utils/                 # Helpers puros
 │   │   ├── utils.js
+│   │   ├── currency.js        # Motor multimoneda: conversiones y normalización
 │   │   ├── eventLabels.js     # Etiquetas de eventos y campos del historial
 │   │   └── tourSteps.js       # Contenido de los tutoriales
 │   ├── views/                 # Una vista por ruta
@@ -160,19 +167,31 @@ VITE_FIREBASE_MEASUREMENT_ID=""   # Opcional, sólo si usas Analytics
 VITE_DOLARVENEZUELA_API_URL="https://dolarflashve.eu/api/rates/all"
 ```
 
-### API de tasa de cambio
+### API de tasas de cambio
 
-La tasa USD/Bs. se obtiene de `https://dolarflashve.eu/api/rates/all` (GET público, sin
-autenticación). No requiere token.
+Las tasas se obtienen de `https://dolarflashve.eu/api/rates/all` (GET público, sin
+autenticación). No requiere token. La respuesta trae cuatro tasas:
+
+```json
+{
+  "bcvUsd":      { "rate": 748.79, "date": "..." },
+  "bcvEur":      { "rate": 861.19, "date": "..." },
+  "binanceBuy":  { "rate": 873.33, "date": "..." },
+  "binanceSell": { "rate": 829.03, "date": "..." }
+}
+```
+
+La app usa `bcvUsd` (Bs/USD), `bcvEur` (Bs/EUR) y el **promedio de `binanceBuy` y `binanceSell`**
+como tasa del USDT.
 
 Dos limitaciones a tener presentes:
 
 * **CORS:** la API no permite peticiones directas desde otro origen, así que en desarrollo se
   llama a través del proxy `/api-dolar` definido en `vite.config.js`. Ese proxy sólo existe con
   `npm run dev`; en un build estático no hay servidor que haga de intermediario.
-* **Sin histórico:** la API sólo devuelve la tasa vigente. Si registras un movimiento con una
-  fecha pasada para la que nunca se guardó una tasa, se usará la de hoy. Para esos casos conviene
-  cargar la tasa manualmente desde la vista de Contabilidad.
+* **Sin histórico:** la API sólo devuelve las tasas vigentes. Si registras un movimiento con una
+  fecha pasada para la que nunca se guardaron tasas, se usarán las de hoy. Para esos casos
+  conviene cargarlas manualmente desde la vista de Contabilidad.
 
 ### Ejecutar la Aplicación
 

@@ -189,33 +189,48 @@ export function accountingTour({ hasTransactions }) {
         {
             title: 'Contabilidad',
             description:
-                'Acá llevas el dinero que entra y sale del negocio, en bolívares y con su equivalente en dólares. Es independiente de la producción: podés registrar la compra de un horno, el pago del local o una venta suelta.' +
+                'Acá llevas el dinero que entra y sale del negocio, en <strong>Bs., dólares, euros o USDT</strong>. Es independiente de la producción: puedes registrar la compra de un horno, el pago del local o una venta suelta.' +
                 REOPEN_HINT,
         },
         {
+            element: '[data-tour="accounting-currency"]',
+            optional: true,
+            title: 'Multimoneda',
+            description:
+                'Puedes registrar movimientos en <strong>Bs., USD, EUR o USDT</strong>, mezclados como sea. Cada uno guarda el monto tal como lo escribiste.' +
+                '<br><br>Para poder sumarlos entre sí, por debajo todos se convierten a una misma unidad (dólares a tasa BCV). Este selector decide en qué moneda quieres <em>leer</em> los totales — no cambia nada de lo guardado.',
+        },
+        {
             element: '[data-tour="accounting-summary"]',
+            optional: true,
             title: 'Ingresos, egresos y saldo',
             description:
-                'El resumen del periodo que tengas filtrado abajo. Cada monto muestra su equivalente en dólares calculado con la tasa de cambio.',
+                'El resumen del periodo que tengas filtrado abajo, en la moneda que elegiste arriba.',
         },
         {
             element: '[data-tour="accounting-rate"]',
-            title: 'La tasa del día',
+            optional: true,
+            title: 'Las tasas del día',
             description:
-                'Se busca sola al abrir esta pantalla. Si la fuente no responde, con <strong>Manual</strong> la cargas a mano y el resto sigue funcionando igual.' +
-                '<br><br><strong>Ojo con las fechas pasadas:</strong> la fuente sólo entrega la tasa de hoy. Si registras un movimiento con una fecha vieja para la que nunca se guardó una tasa, se va a usar la de hoy. Para esos casos conviene cargar la tasa correcta a mano.',
+                'Se buscan solas al abrir esta pantalla. La de <strong>USDT</strong> no viene dada por la fuente: se calcula como el promedio entre el precio de compra y el de venta de Binance.' +
+                '<br><br>La del <strong>BCV (Bs/USD)</strong> es la más importante: es la base con la que se comparan todas las demás monedas. Sin ella no se puede convertir nada.' +
+                '<br><br>Con <strong>Manual</strong> las cargas a mano; las que dejes en blanco no se tocan.' +
+                '<br><br><strong>Ojo con las fechas pasadas:</strong> la fuente sólo entrega las tasas de hoy. Si registras un movimiento con una fecha vieja para la que nunca se guardaron tasas, se van a usar las de hoy. Para esos casos conviene cargarlas a mano.',
         },
         {
             element: '[data-tour="accounting-filters"]',
+            optional: true,
             title: 'Periodo y tipo',
             description:
                 'Todo lo que ves arriba y abajo responde a este filtro. Por defecto muestra los últimos 30 días.',
         },
         {
             element: '[data-tour="accounting-new"]',
+            optional: true,
             title: 'Registrar un movimiento',
             description:
-                'Cargas el monto en bolívares, si es ingreso o egreso, la categoría y la fecha. El equivalente en dólares se calcula solo con la tasa de esa fecha y queda guardado junto al movimiento.',
+                'Cargas el <strong>monto</strong> y eliges su <strong>moneda</strong>, si es ingreso o egreso, la categoría y la fecha. Debajo del monto siempre ves a cuánto equivale y con qué tasa se calculó.' +
+                '<br><br>Si eliges EUR o USDT en una fecha para la que no hay tasa guardada, el formulario te la pide antes de dejarte guardar — prefiere pedírtela a inventar una conversión.',
         },
         {
             element: '[data-tour="accounting-table"]',
@@ -223,7 +238,8 @@ export function accountingTour({ hasTransactions }) {
             when: () => hasTransactions,
             title: 'Los movimientos',
             description:
-                'Cada línea guarda la tasa que se usó en su momento, así que un movimiento viejo no cambia de valor en dólares aunque la tasa de hoy sea otra.',
+                'Cada línea muestra el monto <strong>en la moneda en que lo cargaste</strong>, la tasa que se usó en ese momento y su equivalente en dólares.' +
+                '<br><br>Esa tasa queda congelada a propósito: un movimiento viejo no cambia de valor aunque la tasa de hoy sea otra.',
         },
     ];
 }

@@ -2,6 +2,7 @@
 import ResponsiveTable from './ui/ResponsiveTable.vue';
 import { useDataTable } from '../composables/useDataTable.js';
 import { formatCurrency } from '../utils/utils.js';
+import { currencySymbol, requiredRateKeys, transactionRates } from '../utils/currency.js';
 
 const props = defineProps({
     records: { type: Array, default: () => [] },
@@ -28,10 +29,28 @@ const columns = [
     { key: 'date', label: 'Fecha' },
     { key: 'movement', label: 'Movimiento', mobilePrimary: true },
     { key: 'category', label: 'Categoría' },
-    { key: 'amountBs', label: 'Monto (Bs.)', align: 'right' },
-    { key: 'exchangeRate', label: 'Tasa', align: 'right' },
-    { key: 'amountUsd', label: 'Monto (USD)', align: 'right' },
+    { key: 'amountOriginal', label: 'Monto', align: 'right' },
+    { key: 'ratesApplied', label: 'Tasa aplicada', align: 'right' },
+    { key: 'amountUsdBcv', label: 'Equivalente (USD)', align: 'right' },
 ];
+
+/**
+ * Las tasas con las que se registró el movimiento, sólo las que hicieron falta
+ * para su moneda. Es un snapshot: no cambia aunque hoy la tasa sea otra.
+ */
+function appliedRates(row) {
+    const rates = transactionRates(row);
+    const labels = { bcv: 'Bs/USD', eur: 'Bs/EUR', binance: 'Bs/USDT' };
+    return requiredRateKeys(row.currencyOriginal)
+        .filter(key => rates[key])
+        .map(key => `${labels[key]} ${Number(rates[key]).toFixed(2)}`);
+}
+
+function formatOriginal(row) {
+    const currency = row.currencyOriginal || 'VES';
+    if (currency === 'USDT') return `${formatCurrency(row.amountOriginal, '')} USDT`;
+    return formatCurrency(row.amountOriginal, currencySymbol(currency));
+}
 </script>
 
 <template>
@@ -57,17 +76,20 @@ const columns = [
 
         <template #cell-category="{ row }">{{ row.category || '—' }}</template>
 
-        <template #cell-amountBs="{ row }">
-            <span class="tabular-nums">{{ formatCurrency(row.amountBs, 'Bs.') }}</span>
+        <template #cell-amountOriginal="{ row }">
+            <span class="tabular-nums font-medium">{{ formatOriginal(row) }}</span>
         </template>
 
-        <template #cell-exchangeRate="{ row }">
-            <span class="tabular-nums">{{ row.exchangeRate ? Number(row.exchangeRate).toFixed(2) : 'N/A' }}</span>
+        <template #cell-ratesApplied="{ row }">
+            <span v-if="appliedRates(row).length === 0" class="text-xs text-stone-400">—</span>
+            <span v-else class="tabular-nums text-xs">
+                <span v-for="(rate, i) in appliedRates(row)" :key="i" class="block">{{ rate }}</span>
+            </span>
         </template>
 
-        <template #cell-amountUsd="{ row }">
+        <template #cell-amountUsdBcv="{ row }">
             <span class="tabular-nums" :class="row.type === 'expense' ? 'text-red-600 dark:text-red-400' : ''">
-                {{ row.type === 'expense' ? '−' : '' }}{{ formatCurrency(row.amountUsd, '$') }}
+                {{ row.type === 'expense' ? '−' : '' }}{{ formatCurrency(row.amountUsdBcv, '$') }}
             </span>
         </template>
 

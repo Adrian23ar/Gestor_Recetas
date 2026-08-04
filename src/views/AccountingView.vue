@@ -11,6 +11,7 @@ import { formatCurrency } from '../utils/utils.js';
 import ErrorMessage from '../components/ErrorMessage.vue';
 import { useViewTutorial } from '../composables/useTutorial.js';
 import { accountingTour } from '../utils/tourSteps.js';
+import { CURRENCIES, currencySymbol, fromUsdBcv } from '../utils/currency.js';
 
 const toast = useToast();
 const accountingStore = useAccountingDataStore();
@@ -18,6 +19,7 @@ const accountingStore = useAccountingDataStore();
 const {
     transactions,
     currentDailyRate,
+    currentRates,
     exchangeRates,
     accountingLoading,
     rateFetchingLoading,
@@ -43,8 +45,18 @@ const transactionToDeleteId = ref(null);
 const transactionNameToDelete = ref('');
 
 const showManualRate = ref(false);
-const newRateInput = ref(null);
+const newRateInputs = ref({ bcv: null, eur: null, binance: null });
 const rateUpdateError = ref('');
+
+// Moneda en la que se MUESTRAN los totales. No afecta lo guardado: cada
+// movimiento conserva su monto y su moneda original — esto sólo convierte la
+// unidad canónica (USD BCV) para leerla cómodo.
+const displayCurrency = ref('VES');
+const RATE_ROWS = [
+    { key: 'bcv', label: 'BCV', unit: 'Bs/USD' },
+    { key: 'eur', label: 'Euro', unit: 'Bs/EUR' },
+    { key: 'binance', label: 'USDT', unit: 'Bs/USDT' },
+];
 
 const defaultStartDate = () => {
     const now = new Date();
@@ -107,9 +119,21 @@ const lastRateDate = computed(() => {
     return null;
 });
 
-function usdEquivalent(bsAmount) {
-    if (!currentDailyRate.value || currentDailyRate.value <= 0) return 0;
-    return bsAmount / currentDailyRate.value;
+// summary viene en la unidad canónica (USD BCV); esto lo lleva a la moneda
+// elegida. null = faltan tasas para esa conversión, y la UI lo muestra como
+// "N/D" en vez de inventar un 0.
+function toDisplay(amountUsd) {
+    return fromUsdBcv(amountUsd, displayCurrency.value, currentRates.value);
+}
+
+function formatDisplay(amountUsd) {
+    const value = toDisplay(amountUsd);
+    if (value === null) return 'N/D';
+    // USDT no tiene símbolo de prefijo: va detrás del número. El resto usa el
+    // suyo delante, como el resto de la app (formatCurrency elige el locale
+    // es-VE justamente por el símbolo 'Bs.').
+    if (displayCurrency.value === 'USDT') return `${formatCurrency(value, '')} USDT`;
+    return formatCurrency(value, currencySymbol(displayCurrency.value));
 }
 
 const formatDate = (dateString) => {
@@ -195,14 +219,33 @@ const confirmDeleteTransaction = async () => {
 const handleUpdateRate = async () => {
     rateUpdateError.value = '';
     accountingError.value = null;
-    if (newRateInput.value === null || newRateInput.value <= 0) {
-        rateUpdateError.value = 'Ingresa una tasa válida.';
+
+    // Sólo se envían las que el usuario llenó: updateDailyRate mezcla con lo ya
+    // guardado, así que dejar una vacía no borra la que ya estaba.
+    const entered = {};
+    for (const key of ['bcv', 'eur', 'binance']) {
+        const value = Number(newRateInputs.value[key]);
+        if (newRateInputs.value[key] === null || newRateInputs.value[key] === '') continue;
+        if (!Number.isFinite(value) || value <= 0) {
+            rateUpdateError.value = 'Las tasas deben ser números positivos.';
+            return;
+        }
+        entered[key] = value;
+    }
+
+    if (Object.keys(entered).length === 0) {
+        rateUpdateError.value = 'Ingresa al menos una tasa.';
         return;
     }
-    const success = await updateDailyRate(newRateInput.value);
+    if (!currentRates.value.bcv && !entered.bcv) {
+        rateUpdateError.value = 'Falta la tasa BCV (Bs/USD): es la base de todas las conversiones.';
+        return;
+    }
+
+    const success = await updateDailyRate(entered);
     if (success) {
-        toast.success(`Tasa del día actualizada manualmente a ${formatCurrency(newRateInput.value, '')}`);
-        newRateInput.value = null;
+        toast.success('Tasas del día actualizadas manualmente.');
+        newRateInputs.value = { bcv: null, eur: null, binance: null };
         showManualRate.value = false;
     } else {
         rateUpdateError.value = accountingError.value || 'No se pudo actualizar la tasa manualmente.';
@@ -236,51 +279,82 @@ onMounted(async () => {
             <button type="button" data-tour="accounting-new" class="ui-btn-primary" @click="openAddModal">Registrar movimiento</button>
         </div>
 
+        <div data-tour="accounting-currency" class="flex flex-wrap items-center gap-2">
+            <span class="text-xs font-semibold text-stone-600 dark:text-stone-300">Ver totales en</span>
+            <div class="ui-seg-track">
+                <button v-for="currency in CURRENCIES" :key="currency.code" type="button"
+                    :class="displayCurrency === currency.code ? 'ui-seg-active' : 'ui-seg'"
+                    @click="displayCurrency = currency.code">
+                    {{ currency.code === 'VES' ? 'Bs.' : currency.code }}
+                </button>
+            </div>
+        </div>
+
         <div data-tour="accounting-summary" class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));">
             <div class="ui-stat-tile">
                 <p class="ui-label !mb-2">Ingresos</p>
                 <p class="text-[28px] font-semibold tabular-nums tracking-[-0.03em] text-emerald-700 dark:text-emerald-400">
-                    {{ formatCurrency(summary.totalIncome, 'Bs.') }}
+                    {{ formatDisplay(summary.totalIncome) }}
                 </p>
-                <p class="mt-1 text-xs tabular-nums text-stone-400">≈ {{ formatCurrency(usdEquivalent(summary.totalIncome), '$') }}</p>
+                <p v-if="displayCurrency !== 'USD'" class="mt-1 text-xs tabular-nums text-stone-400">
+                    ≈ {{ formatCurrency(summary.totalIncome, '$') }}
+                </p>
             </div>
             <div class="ui-stat-tile">
                 <p class="ui-label !mb-2">Egresos</p>
                 <p class="text-[28px] font-semibold tabular-nums tracking-[-0.03em] text-red-700 dark:text-red-400">
-                    {{ formatCurrency(summary.totalExpenses, 'Bs.') }}
+                    {{ formatDisplay(summary.totalExpenses) }}
                 </p>
-                <p class="mt-1 text-xs tabular-nums text-stone-400">≈ {{ formatCurrency(usdEquivalent(summary.totalExpenses), '$') }}</p>
+                <p v-if="displayCurrency !== 'USD'" class="mt-1 text-xs tabular-nums text-stone-400">
+                    ≈ {{ formatCurrency(summary.totalExpenses, '$') }}
+                </p>
             </div>
             <div class="ui-card-inverted p-5">
                 <p class="text-xs font-semibold text-stone-300">Saldo neto</p>
                 <p class="mt-2 text-[28px] font-semibold tabular-nums tracking-[-0.03em]"
                     :class="summary.netBalance >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                    {{ formatCurrency(summary.netBalance, 'Bs.') }}
+                    {{ formatDisplay(summary.netBalance) }}
                 </p>
-                <p class="mt-1 text-xs tabular-nums text-stone-400">≈ {{ formatCurrency(usdEquivalent(summary.netBalance), '$') }}</p>
+                <p v-if="displayCurrency !== 'USD'" class="mt-1 text-xs tabular-nums text-stone-400">
+                    ≈ {{ formatCurrency(summary.netBalance, '$') }}
+                </p>
             </div>
             <div data-tour="accounting-rate" class="ui-stat-tile">
                 <div class="flex items-center justify-between">
-                    <p class="ui-label !mb-0">Tasa del día</p>
+                    <p class="ui-label !mb-0">Tasas del día</p>
                     <span class="ui-badge-success">BCV</span>
                 </div>
-                <p class="mt-2 text-[28px] font-semibold tabular-nums tracking-[-0.03em] text-amber-600 dark:text-amber-400">
-                    <template v-if="rateFetchingLoading">…</template>
-                    <template v-else-if="currentDailyRate">{{ formatCurrency(currentDailyRate, '', false) }}</template>
-                    <template v-else>N/D</template>
-                </p>
+                <div class="mt-2 space-y-1.5">
+                    <div v-for="(row, index) in RATE_ROWS" :key="row.key" class="flex items-baseline justify-between gap-2">
+                        <span class="shrink-0 text-xs font-medium text-stone-500 dark:text-stone-400">
+                            {{ row.label }} <span class="text-stone-400">{{ row.unit }}</span>
+                        </span>
+                        <span class="tabular-nums tracking-[-0.02em] text-amber-600 dark:text-amber-400"
+                            :class="index === 0 ? 'text-[26px] font-semibold' : 'text-sm font-semibold'">
+                            <template v-if="rateFetchingLoading">…</template>
+                            <template v-else-if="currentRates[row.key]">{{ formatCurrency(currentRates[row.key], '', false) }}</template>
+                            <template v-else>N/D</template>
+                        </span>
+                    </div>
+                </div>
                 <div class="mt-3 flex flex-wrap gap-2">
                     <button type="button" :disabled="rateFetchingLoading" class="ui-btn-subtle" @click="triggerAutoRateFetch">
                         Actualizar del BCV
                     </button>
                     <button type="button" class="ui-btn-outline" @click="showManualRate = !showManualRate">Manual</button>
                 </div>
-                <div v-if="showManualRate" class="mt-3 flex items-center gap-2">
-                    <input v-model.number="newRateInput" type="number" placeholder="Tasa manual" min="0" step="any" class="ui-input-sm flex-1" />
+                <div v-if="showManualRate" class="mt-3 space-y-2">
+                    <div v-for="row in RATE_ROWS" :key="row.key">
+                        <label class="ui-label !mb-1" :for="`manual-rate-${row.key}`">{{ row.label }} ({{ row.unit }})</label>
+                        <input :id="`manual-rate-${row.key}`" v-model.number="newRateInputs[row.key]" type="number"
+                            :placeholder="currentRates[row.key] ? String(currentRates[row.key]) : 'Sin tasa'" min="0" step="any"
+                            class="ui-input-sm w-full" />
+                    </div>
+                    <p class="text-xs text-stone-400">Deja en blanco las que no quieras cambiar.</p>
                     <button type="button"
-                        class="cursor-pointer rounded-control bg-accent-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-accent-700 dark:bg-accent-500 dark:hover:bg-accent-600"
+                        class="w-full cursor-pointer rounded-control bg-accent-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-accent-700 dark:bg-accent-500 dark:hover:bg-accent-600"
                         @click="handleUpdateRate">
-                        Guardar
+                        Guardar tasas
                     </button>
                 </div>
                 <p v-if="rateUpdateError" class="mt-1.5 text-xs text-red-600 dark:text-red-400">{{ rateUpdateError }}</p>

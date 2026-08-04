@@ -1,125 +1,164 @@
-# Handoff — sesión 2026-08-03 / 2026-08-04
+# Handoff — sesión 2026-08-04 (multimoneda en Contabilidad)
 
-**Punto de partida:** `552eed9` — "documentacion de la sesion". Todo lo de abajo va en el commit
-siguiente, sobre `main`.
+**Punto de partida:** `ab123b5` — "Tutoriales guiados por vista y mejoras en Historial y
+Contabilidad".
 
 Ver también [CLAUDE.md](CLAUDE.md) para contexto de proyecto/arquitectura de cara a futuro.
 Este archivo es un registro de lo que pasó en *esta* sesión puntual, no documentación viva.
 
 ## Qué se pidió
 
-1. Arreglar el responsive de la vista de Historial en móvil y agregarle filtros de búsqueda por
-   día, semana, mes y últimos 3 meses.
-2. Traducir al español dos etiquetas que salían en inglés en el modal de detalle del historial
-   ("Calculated Total Batch Cost All Included" y "Calculated Recipe Only Cost").
-3. Arreglar el responsive del filtro "Periodo" en la vista de Contabilidad.
-4. Agregar un tutorial guiado por cada vista con driver.js, incluyendo uno que explique márgenes
-   y mano de obra dentro de la ficha de receta. Con la paleta y los estilos de la app, y sin
-   explicar cosas que no estén a la vista (estados vacíos).
-5. Documentar la sesión, revisar el README y hacer commit + push.
+Manejar multimoneda en el módulo de contabilidad, aprovechando que la API de tasas
+(`dolarflashve.eu/api/rates/all`) devuelve cuatro tasas y no una: `bcvUsd`, `bcvEur`,
+`binanceBuy` y `binanceSell`. Requisito explícito: **la de Binance debe ser el promedio de compra
+y venta, y llamarse USDT**.
+
+Como referencia, el usuario señaló el proyecto hermano `pirulai_finances` (carpeta al lado de
+este repo) para copiar su modelo de multimoneda en vez de inventar uno.
+
+## Lo que se sacó del proyecto hermano
+
+De `pirulai_finances_context.md` §4.2 y `src/features/transactions/hooks/useAddTransaction.js`:
+
+1. **Unidad canónica.** Cada movimiento guarda, además del monto original, su equivalente en
+   "USD a tasa BCV" (`amount_usd_bcv` allá, `amountUsdBcv` acá). *Todas* las sumas se hacen sobre
+   ese campo — es lo único que permite totalizar monedas distintas.
+2. **Snapshot de tasas por transacción** (`rate_*_applied`): un movimiento viejo no cambia de
+   valor porque cambió la tasa de hoy.
+3. **Conversión asimétrica.** Las tasas están en "Bs. por 1 unidad", así que VES *divide* entre
+   la del BCV, mientras que EUR y USDT *multiplican* por la suya (pasan a Bs.) y recién ahí
+   dividen entre la del BCV. Invertir esto es el error fácil.
+4. **Salvavidas ante tasas faltantes**: nunca mostrar 0 cuando falta una tasa.
+5. De su handoff del 2026-08-03 se tomó además la lección de fondo: *"la persistencia se resuelve
+   en la lectura, no en la copia"* — de ahí la decisión de no migrar datos (ver abajo).
+
+## Decisiones acordadas con el usuario antes de escribir código
+
+| Pregunta | Elección |
+|---|---|
+| Monedas | Las 4 de Pirulai: **VES, USD, EUR, USDT** |
+| Totales | **Selector de moneda** en la vista, como el Dashboard de Pirulai |
+| Datos ya registrados | **Normalizar al leer**, sin reescribir nada en Firestore |
 
 ## Qué se hizo
 
-### 1. Historial: traducción, responsive y filtros de fecha
+### 1. `src/utils/currency.js` (nuevo) — el motor, en funciones puras
 
-- **La traducción ya existía**, el problema era el *fallback*. El diccionario de etiquetas de
-  campo vivía dentro de `src/stores/userData.js` y sólo se usaba al ESCRIBIR el evento
-  (`change.label`). Al leer, tanto `EventDetailsModal` como el resumen de la lista hacían
-  `change.label || change.field` — y ahí caían las entradas viejas guardadas sin `label`,
-  mostrando el nombre crudo del campo en camelCase. Se movió el diccionario a
-  `src/utils/eventLabels.js` como `getFieldLabel()` (junto al `getEventMeta()` que ya estaba) y
-  ahora los dos componentes lo usan como fallback. Arregla los eventos viejos y los nuevos sin
-  tocar datos guardados.
-- **Responsive:** el botón "Ver detalle" de cada fila ahora va pegado al borde derecho en móvil
-  (`max-[640px]:ml-auto`); antes quedaba justo después de la etiqueta, así que el borde derecho
-  se veía irregular de fila en fila. Padding más ajustado y más aire vertical en móvil.
-- **Filtros de fecha:** fila de chips (Todos / Hoy / Esta semana / Este mes / Últimos 3 meses)
-  con las clases `.ui-chip` que ya usa el Dashboard. "Esta semana" y "Este mes" usan límites de
-  calendario (la semana arranca el lunes); "Últimos 3 meses" es una ventana móvil. Se combinan
-  con el buscador que ya existía.
+`CURRENCIES`, `toUsdBcv` / `fromUsdBcv` (inversas exactas), `requiredRateKeys`, `parseApiRates`,
+`normalizeRateEntry`, `normalizeTransaction`, `transactionRates`.
 
-### 2. Contabilidad: responsive del filtro "Periodo"
+Dos criterios que conviene no aflojar:
 
-Los cuatro elementos (etiqueta, fecha, guion, fecha) estaban en un único contenedor
-`flex-wrap` plano, así que cada uno saltaba de línea por su cuenta y el guion quedaba huérfano
-entre dos campos apilados. Se agruparon los dos date pickers + el guion en una fila propia que
-baja completa debajo de la etiqueta, y los campos se reparten el ancho sólo en móvil
-(`max-[640px]:flex-1`, pisando su ancho fijo de 152px). En escritorio no cambia nada.
+- **`null`, nunca 0, cuando falta una tasa.** Un 0 silencioso se sumaría a un total y lo
+  falsearía sin que nadie se entere. Quien llama decide qué hacer; la UI muestra "N/D" y bloquea
+  el guardado.
+- **`requiredRateKeys` es por moneda**: USD no necesita ninguna tasa (ya *es* la unidad), VES sólo
+  la del BCV, y EUR/USDT necesitan **dos** (la suya y la del BCV, que es el denominador). Eso es
+  lo que decide qué inputs muestra la carga manual y cuándo se puede guardar.
 
-### 3. Tutoriales guiados (driver.js) — lo grueso de la sesión
+### 2. Store (`src/stores/accountingData.js`)
 
-Tres archivos nuevos:
+- `parseApiRates` reemplaza el parseo de `bcvUsd.rate` suelto. **USDT = promedio de `binanceBuy`
+  y `binanceSell`**; si sólo llega una de las dos, se usa esa.
+- `updateDailyRate` acepta un número (se interpreta como BCV solo, que es como lo llaman el botón
+  "Manual" y el modal) **o** el juego completo. Las tasas vacías **no borran** las ya guardadas
+  para esa fecha: se mezclan. Así, ajustar el BCV a mano no tumba el EUR/USDT que trajo la API.
+- El evento de historial de tasas ahora lista una línea por tasa cambiada, no una fija.
+- `getRatesForExactDate` (nueva) devuelve el juego; `getRateForExactDate` quedó como envoltorio
+  que devuelve sólo el BCV, para no romper a quien ya la llamaba.
+- `_buildTransactionBody` (nueva) centraliza el armado del cuerpo multimoneda de un movimiento;
+  la usan `addTransaction` y `saveTransaction`, que antes duplicaban el cálculo.
+- `calculateSummary` suma `amountUsdBcv` en vez de `amountBs`. **Devuelve USD**, no bolívares —
+  la vista se encarga de convertir.
 
-- `src/composables/tutorialDriver.js` — chunk lazy con la librería y su CSS.
-- `src/composables/useTutorial.js` — la capa sobre driver.js: registro del tour de la vista
-  activa, filtrado de pasos, textos en español y persistencia del "ya lo vio".
-- `src/utils/tourSteps.js` — todo el contenido, una función por vista.
+### 3. Vista, modal y tabla
 
-Más el botón `?` en el header de `App.vue` (sólo aparece si la vista montada registró un tour) y
-atributos `data-tour="..."` como anclajes en las cinco vistas y en `RecipeDrawer`.
+- **`AccountingView`**: selector de moneda (Bs./USD/EUR/USDT) que convierte los tres totales en
+  vivo; la tarjeta de tasas pasó de un número a las tres filas (BCV grande, EUR y USDT abajo), y
+  la carga manual pasó de un input a uno por tasa con "deja en blanco las que no quieras cambiar".
+- **`TransactionModal`**: selector de moneda junto al monto (con `@vueform/multiselect`, no un
+  `<select>` nativo, siguiendo la convención del rediseño). Se conservó la cascada de resolución
+  de tasa de cuatro escalones (API → exacta guardada → anterior con elección → manual); lo único
+  que cambió es que ahora resuelve el juego `{bcv, eur, binance}` en vez de un número. La carga
+  manual muestra un input por cada tasa que falte para la moneda elegida.
+- **`AccountingTransactionsTable`**: las columnas Monto (Bs.)/Tasa/Monto (USD) pasaron a
+  Monto (en su moneda original) / Tasa aplicada / Equivalente (USD).
 
-Decisiones que conviene recordar:
+### 4. Fix reportado al probar: la caché tapaba las tasas nuevas
 
-- **Apertura automática** la primera vez que se entra a cada vista, marcada en `localStorage`
-  (clave `tutorialSeen`). Espera a que la vista salga del skeleton (parámetro `ready` de
-  `useViewTutorial`) para no señalar esqueletos de carga.
-- **Estados vacíos:** `optional: true` descarta el paso si su elemento no está visible;
-  `when: () => bool` lo descarta por condición de datos. Se usan pares complementarios de `when`
-  donde el mismo elemento necesita dos textos distintos (tabla de inventario con y sin datos;
-  tarjeta de estimación de Producción con y sin receta elegida).
-- El filtrado ocurre **antes** de instanciar driver, no con su opción `skipMissingElement`,
-  porque esa opción salta pasos pero los sigue contando en el "3 de 8".
-- El tour del drawer **cambia de pestaña solo** al avanzar (y vuelve atrás al retroceder) usando
-  `onNext`/`onPrev`. Sus pasos de la pestaña de costos NO van marcados `optional` justamente
-  porque su DOM todavía no existe cuando arranca el tour.
-- El contenido de márgenes y mano de obra se escribió contra la fórmula real de
-  `useRecipeCosts.js`, no de memoria: el margen es *markup sobre el costo* y el buffer se aplica
-  *después* de la ganancia. El paso del margen incluye el ejemplo numérico y la aclaración de que
-  40% sobre costo = 28,6% sobre venta, que es la confusión clásica.
-- Estilos en la sección 9 de `style.css`, con `!important` por el mismo motivo que el datepicker
-  (CSS de librería en chunk lazy, orden de carga no garantizado). La flecha del popover hay que
-  recolorearla lado por lado en modo oscuro porque hereda del `border` del elemento.
+Con la app corriendo, la consola mostró
+`[Caché] Tasas encontradas para 2026-08-04: {bcv: 748.79, eur: null, binance: null}` — nunca
+llegaba a la API a buscar EUR y USDT.
 
-### 4. Documentación
+La causa: el corto-circuito de caché de `getRatesFromApi` preguntaba `if (existingRates.bcv)`,
+que era una condición correcta cuando existía **una sola** tasa. El registro de hoy ya existía
+(creado antes de este cambio, con sólo el BCV), así que se daba por bueno y EUR/USDT quedaban en
+`null` para siempre.
 
-- `CLAUDE.md`: sección nueva "Tutoriales guiados", driver.js agregado al stack y gotcha #7 nuevo
-  sobre las dos trampas de la librería (el hook `onNextClick` que desactiva el avance automático,
-  y el contador de progreso que cuenta el array completo). Los gotchas viejos se renumeraron.
-- `README.md`: estaba bastante desactualizado. Se corrigieron cosas que ya no existen (DataTables,
-  Chart.js, tipografía Inter, los composables `useUserData`/`useAccountingData` como fuente de
-  estado, y un token hardcodeado de `pydolarve.org` que ya no aplica) y se agregó lo que faltaba
-  (Pinia, persistencia offline, `ResponsiveTable`, la API nueva del dólar con sus dos
-  limitaciones, los tutoriales y el árbol de directorios real).
+Ahora la caché sólo corta el flujo si está **completa**, con dos matices deliberados:
+
+- **Sólo se completa la fecha de hoy.** Para fechas pasadas se sigue devolviendo lo cacheado
+  aunque esté incompleto: la API no tiene histórico, y rellenar un día viejo con las tasas de hoy
+  sería atribuirle valores que no le corresponden. Para esos días está la carga manual del modal.
+- **Al completar no se pisa lo que ya estaba.** Si había un BCV guardado (típicamente cargado a
+  mano porque la API venía mal o caída), se conserva y sólo se agregan las que faltaban.
+- Si la API falla teniendo caché parcial, se devuelve esa caché en vez de `[]` — antes ese camino
+  no existía porque el corto-circuito nunca dejaba llegar a la API.
+
+### 5. Fix reportado al probar: el modal se rompía en el campo de monto
+
+El input de monto quedaba aplastado a unos pocos píxeles, el selector de moneda ocupaba casi todo
+el ancho y aparecía una barra de scroll horizontal en el modal.
+
+Causa: monto y moneda estaban en un `flex` con anchos a medida, pero **los dos hijos traen
+`w-full` propio con `!important`** — `.ui-input` por su definición en `style.css`, y el contenedor
+de `@vueform/multiselect` por `multiselectTheme.container`. Con `important: true` ningún ancho
+por-uso (`flex-1`, `w-[116px]`, `min-w-0`) puede ganarles, así que ambos pedían el 100% del ancho
+y se desbordaban. Es el gotcha #1 en su forma más literal.
+
+Se resolvió **dejando de pelear**: monto y moneda pasaron a ser dos celdas de una grilla
+`grid-cols-2` que colapsa a una columna bajo 640px, igual que la fila Fecha/Categoría de arriba.
+Ahí el ancho completo de la celda es justo lo que se quiere, y no hace falta ningún override.
+
+En el mismo pase se quitó el símbolo de moneda que estaba dentro del input: necesitaba un
+`padding-left` por-uso para dejarle sitio, override que tampoco podía ganarle al padding
+`!important` de `.ui-input` — el selector de al lado ya dice en qué moneda va el monto.
+
+### 6. Historial y tutorial
+
+- `getFieldLabel` de `src/utils/eventLabels.js` ahora conoce los campos de contabilidad. Esto
+  **cierra de paso el hueco que quedó anotado en el handoff anterior**: los eventos viejos de
+  transacciones sin `label` mostraban "Amount Bs" en vez de "Monto (Bs.)".
+- El tutorial de Contabilidad explica la multimoneda, de dónde sale la tasa del USDT y por qué la
+  del BCV es la base de todo.
 
 ## Estado al cerrar la sesión
 
-- `npm run build` pasa limpio (936 módulos, ~3,5 s).
-- driver.js queda en su propio chunk lazy (26,1 kB / 7,5 kB gzip + 3 kB de CSS). El bundle de
-  entrada quedó en 668,4 kB, prácticamente igual que antes (668,3 kB).
-- Se verificó en el CSS compilado que las reglas del popover y las cuatro de la flecha salieron
-  con sus selectores correctos.
-- **Nada se verificó visualmente en el navegador** — restricción explícita del usuario, que
-  revisa la UI él mismo con `npm run dev`.
+- `npm run build` pasa limpio (937 módulos, ~3,4 s). `AccountingView` pesa ahora 41,6 kB
+  (antes 34,2 kB); el bundle de entrada quedó igual (668,4 kB).
+- **La matemática se verificó ejecutándola** con los números reales que pasó el usuario
+  (bcv 748,79 · eur 861,19 · buy 873,33 · sell 829,03):
+  - USDT = 851,18 → promedio exacto de compra y venta.
+  - 1000 Bs → 1,3355 USD · 100 EUR → 115,0109 USD · 100 USDT → 113,6741 USD.
+  - Ida y vuelta (`toUsdBcv` → `fromUsdBcv`) devuelve el valor original exacto en las 4 monedas.
+  - Con una tasa faltante devuelve `null`, no 0.
+- **Nada se verificó visualmente en el navegador** — restricción explícita del usuario.
 
 ## Cosas para tener en el radar
 
-- **Los tutoriales no se probaron corriendo.** Lo más probable que necesite ajuste: el retardo de
-  la apertura automática (`AUTOSTART_DELAY`, 450 ms en `useTutorial.js`) y la posición de algún
-  popover en pantallas angostas.
-- **Para volver a ver las aperturas automáticas** hay que borrar la clave `tutorialSeen` de
-  localStorage a mano. No se hizo UI para eso.
-- `node_modules` no existía al empezar la sesión. Al instalar driver.js, npm refrescó cuatro
-  dependencias transitivas a versiones patch dentro de sus rangos ya existentes (`nanoid`,
-  `postcss`, `protobufjs` y una más). No se quitó nada del lockfile y el build pasa.
-- `src/composables/useUserData.js` quedó con un cambio de sólo espacios en blanco en el árbol de
-  trabajo que **no** entró al commit (es código muerto, ver CLAUDE.md).
-- **El mismo bug de etiquetas en inglés sigue latente para contabilidad.** `getFieldLabel()` de
-  `src/utils/eventLabels.js` (el fallback de lectura que se arregló esta sesión) no conoce los
-  campos que sólo usa `src/stores/accountingData.js` — `description`, `notes`, `category`,
-  `type`, `amountBs`, `exchangeRate`, `amountUsd`, `rate` — porque ese store mantiene su propio
-  diccionario local. Un evento de transacción viejo, guardado sin `label`, mostraría "Amount Bs"
-  en vez de "Monto (Bs.)". Se detectó pero no se tocó por estar fuera de lo pedido; la solución
-  es mover esas claves al diccionario compartido (no hay colisiones: `name` y `date` coinciden en
-  ambos).
-- Sigue pendiente de la sesión anterior: **CORS en producción sin verificar** para la API del
-  dólar, y que esa API **no tiene lookup histórico** de tasas.
+- **Los movimientos viejos se interpretan como bolívares.** Es correcto (hasta esta sesión no
+  había otra opción), pero conviene que el usuario lo confirme mirando la tabla: deberían seguir
+  mostrando el mismo monto en Bs. y el mismo equivalente en USD que antes.
+- **El equivalente de los movimientos viejos viene redondeado a 2 decimales**, porque así se
+  guardó en su momento (`amountUsd`). Los nuevos usan 6. En totales grandes puede haber una
+  diferencia de centavos frente a un recálculo — se prefirió respetar el valor que el usuario vio
+  cuando registró el movimiento antes que recalcularlo hoy.
+- **Al editar un movimiento viejo, sus campos `amountBs`/`exchangeRate`/`amountUsd` quedan en el
+  documento de Firestore con el valor anterior.** Son inertes (ningún lector los mira una vez que
+  existe `currencyOriginal`), pero están ahí. Si algún día molesta, hay que limpiarlos
+  explícitamente: un `set(..., {merge:true})` no borra campos.
+- **`openAddModal` sigue exigiendo tasa BCV** para abrir el modal, incluso si el movimiento fuera
+  a ser en USD (que no necesita ninguna tasa). Es conservador y viene de antes; si el usuario
+  quiere registrar movimientos en dólares sin tasa cargada, ahí hay que aflojarlo.
+- Sigue pendiente de sesiones anteriores: **CORS en producción sin verificar** para la API, y que
+  esa API **no tiene lookup histórico** de tasas.

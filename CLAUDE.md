@@ -5,8 +5,8 @@ Contexto de proyecto para IA (Claude Code u otra) o desarrolladores que trabajen
 ## Qué es esto
 
 Gestor de recetas para un negocio de repostería/pastelería: recetas y su costeo, inventario de
-ingredientes, registro de producción (lotes), contabilidad (ingresos/egresos en Bs. con tasa de
-cambio USD/Bs.), e historial de eventos (auditoría de cambios). Toda la UI está en español
+ingredientes, registro de producción (lotes), contabilidad multimoneda (ingresos/egresos en Bs.,
+USD, EUR o USDT), e historial de eventos (auditoría de cambios). Toda la UI está en español
 (Venezuela).
 
 ## Stack
@@ -35,7 +35,8 @@ cambio USD/Bs.), e historial de eventos (auditoría de cambios). Toda la UI est�
   son versiones VIEJAS pre-Pinia que ya NO se usan en ningún sitio (nada las importa) — no
   asumas que editarlas tiene efecto, confirma con grep de imports antes de tocar cualquiera
   de las dos
-- `src/utils/` — helpers puros (formateo, temas compartidos, labels de eventos)
+- `src/utils/` — helpers puros (formateo, temas compartidos, labels de eventos, conversión
+  multimoneda en `currency.js`, contenido de los tutoriales en `tourSteps.js`)
 
 ## Sistema de diseño
 
@@ -56,6 +57,31 @@ referencia si hay que tocar UI otra vez. Resumen rápido:
   `<Transition name="modal-transition">` (scale+fade); `RecipeDrawer` usa
   `<Transition name="drawer-transition">` (desliza desde la derecha) — son bloques CSS
   independientes en `style.css`, no los fusiones aunque se parezcan.
+
+## Motor multimoneda (contabilidad)
+
+El módulo de contabilidad acepta movimientos en **Bs. (VES), USD, EUR y USDT**. Modelo adaptado
+del proyecto hermano `pirulai_finances` (ver su `pirulai_finances_context.md` §4.2).
+
+- **`src/utils/currency.js`** — funciones puras: `toUsdBcv` / `fromUsdBcv`, `parseApiRates`,
+  `requiredRateKeys`, y los normalizadores de lectura.
+- **Unidad canónica `amountUsdBcv`** (USD a tasa BCV): TODA suma o comparación se hace sobre ese
+  campo. Nunca totalizar sobre `amountOriginal` — mezcla bolívares con dólares, euros y USDT.
+  `calculateSummary` devuelve USD; la vista convierte a la moneda que elija el usuario.
+- **Las tasas son "Bs. por 1 unidad"**: `bcv` (Bs/USD), `eur` (Bs/EUR), `binance` (Bs/USDT).
+  Por eso la conversión es asimétrica: VES **divide** entre `bcv`, mientras que EUR y USDT
+  **multiplican** por su propia tasa (pasan a Bs.) y recién ahí dividen entre `bcv`.
+- **USDT no viene dado por la API**: es el **promedio** de `binanceBuy.rate` y `binanceSell.rate`
+  (`parseApiRates`). Si sólo llega una de las dos, se usa esa.
+- **Snapshot por transacción**: `rateBcvApplied` / `rateEurApplied` / `rateBinanceApplied` se
+  congelan al guardar, junto con `amountUsdBcv`. Un movimiento viejo NO debe cambiar de valor
+  porque cambió la tasa de hoy — no recalcular `amountUsdBcv` al leer.
+- **Faltar una tasa devuelve `null`, no 0.** Un 0 silencioso contaminaría un total; la UI muestra
+  "N/D" y bloquea el guardado.
+- **Compatibilidad hacia atrás sin migración**: `normalizeTransaction` / `normalizeRateEntry`
+  resuelven EN LA LECTURA los documentos anteriores (transacciones con
+  `amountBs`/`exchangeRate`/`amountUsd`, que son bolívares por definición; tasas con sólo `rate`,
+  que era la del BCV). No se reescribe nada en Firestore.
 
 ## Tutoriales guiados
 
@@ -84,6 +110,11 @@ que explica de dónde sale el precio (mano de obra, margen, buffer).
    en el mismo elemento pierde contra la clase `.ui-*`, incluso con su propio `!`. Regla: si una
    propiedad necesita override por-uso en algún sitio, no la metas en una clase `.ui-*`
    compartida — usa utilidades planas en el punto de uso.
+   **Corolario práctico (2026-08-04):** no pongas dos controles con `w-full` propio en un mismo
+   `flex` esperando repartir el ancho con `flex-1`/`min-w-0`/`w-[Npx]`. Tanto `.ui-input` como
+   `multiselectTheme.container` traen su `w-full` con `!important`: los dos piden el 100% y se
+   desbordan. Usa una grilla y deja que cada uno ocupe su celda (ver el campo Monto/Moneda de
+   `TransactionModal.vue`).
 2. **`@apply` no resuelve utilidades `animate-*` custom** (definidas en `theme.extend.animation`
    del config legacy) dentro de Tailwind v4. Se aplican como clase literal en el template o,
    más robusto, como `:style="{ animation: 'nombre 1.4s ease-in-out infinite' }"` apuntando al
@@ -134,12 +165,14 @@ que explica de dónde sale el precio (mano de obra, margen, buffer).
 - **Firebase**: Auth (Google) + Firestore, config en `.env` (no versionado, ver
   `.env.example`). Persistencia offline habilitada — la app funciona sin conexión usando el
   caché local de Firestore.
-- **Tasa de cambio USD/Bs.**: `https://dolarflashve.eu/api/rates/all` (GET público, sin auth,
-  campo `bcvUsd.rate`). Solo devuelve la tasa VIGENTE, no tiene lookup por fecha histórica (a
-  diferencia del Supabase edge function que usaba antes). En dev se llama vía el proxy de
-  `vite.config.js` (`/api-dolar` → el host real) porque el API no permite CORS directo desde
-  otro origen; en producción (build estático, sin proxy) puede volver a fallar por CORS si el
-  API no lo permite — **no verificado en producción todavía**.
+- **Tasas de cambio**: `https://dolarflashve.eu/api/rates/all` (GET público, sin auth). Devuelve
+  `bcvUsd`, `bcvEur`, `binanceBuy` y `binanceSell`, cada uno con `{ rate, date }`. La app usa
+  `bcvUsd.rate` (Bs/USD), `bcvEur.rate` (Bs/EUR) y el **promedio** de las dos de Binance como
+  tasa del USDT — ver el motor multimoneda arriba. Solo devuelve las tasas VIGENTES, no tiene
+  lookup por fecha histórica (a diferencia del Supabase edge function que usaba antes). En dev se
+  llama vía el proxy de `vite.config.js` (`/api-dolar` → el host real) porque el API no permite
+  CORS directo desde otro origen; en producción (build estático, sin proxy) puede volver a fallar
+  por CORS si el API no lo permite — **no verificado en producción todavía**.
 
 ## Cosas que el usuario pidió explícitamente evitar
 

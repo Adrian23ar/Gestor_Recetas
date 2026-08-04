@@ -6,6 +6,12 @@ import { db } from '../main';
 import { collection, doc, getDocs, setDoc, deleteDoc, addDoc, writeBatch, query, where, orderBy, limit, Timestamp, serverTimestamp } from "firebase/firestore";
 import { useLocalStorage } from '../composables/useLocalStorage';
 import { useEventHistory } from '../composables/useEventHistory';
+import {
+    normalizeRateEntry,
+    normalizeTransaction,
+    parseApiRates,
+    toUsdBcv,
+} from '../utils/currency.js';
 
 export const useAccountingDataStore = defineStore('accountingData', () => {
     // --- Claves para localStorage ---
@@ -20,7 +26,11 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
     const specificDateRateFetchingLoading = ref(false);
     const accountingError = ref(null);
     const specificDateRateError = ref(null);
+    // Tasa BCV vigente (Bs/USD). Se conserva como número suelto porque es la
+    // única obligatoria: sin ella no hay unidad canónica y media app se queda sin
+    // poder convertir. Las tres juntas van en currentRates.
     const currentDailyRate = ref(null);
+    const currentRates = ref({ bcv: null, eur: null, binance: null });
 
     // --- NUEVO: Caché para la respuesta de la API ---
     const apiRatesCache = ref(null);
@@ -38,10 +48,21 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             date: 'Fecha',
             category: 'Categoría',
             type: 'Tipo Transacción',
+            // Campos anteriores a la multimoneda: se conservan porque los eventos
+            // ya registrados los siguen nombrando.
             amountBs: 'Monto (Bs.)',
             exchangeRate: 'Tasa de Cambio (Bs/USD)',
             amountUsd: 'Monto (USD)',
-            rate: 'Tasa (Bs/USD)',
+            rate: 'Tasa BCV (Bs/USD)',
+            // Multimoneda
+            amountOriginal: 'Monto',
+            currencyOriginal: 'Moneda',
+            amountUsdBcv: 'Equivalente (USD BCV)',
+            rateBcvApplied: 'Tasa BCV aplicada (Bs/USD)',
+            rateEurApplied: 'Tasa EUR aplicada (Bs/EUR)',
+            rateBinanceApplied: 'Tasa USDT aplicada (Bs/USDT)',
+            rateEur: 'Tasa BCV (Bs/EUR)',
+            rateBinance: 'Tasa USDT (Bs/USDT)',
         };
         return labels[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
     }
@@ -76,14 +97,14 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             const localTodayString = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
             const rateForToday = exchangeRates.value.find(r => r.date === localTodayString);
 
-            if (rateForToday) {
-                currentDailyRate.value = rateForToday.rate;
-            } else if (exchangeRates.value.length > 0) {
-                currentDailyRate.value = exchangeRates.value[0].rate;
-            } else {
-                currentDailyRate.value = null;
-            }
+            // Sin fila de hoy se cae a la más reciente guardada, para no dejar la
+            // app sin tasas: es preferible una tasa vieja y visible (la tarjeta
+            // muestra de qué día es) que no poder convertir nada.
+            const source = rateForToday || exchangeRates.value[0] || null;
+            currentRates.value = normalizeRateEntry(source);
+            currentDailyRate.value = currentRates.value.bcv;
         } else {
+            currentRates.value = { bcv: null, eur: null, binance: null };
             currentDailyRate.value = null;
         }
     }
@@ -119,12 +140,15 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
                     getDocs(ratesQuery)
                 ]);
 
-                transactions.value = transSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // normalizeTransaction resuelve EN LA LECTURA los movimientos
+                // anteriores a la multimoneda (amountBs/exchangeRate/amountUsd).
+                // No se reescribe nada en Firestore: se interpretan, no se migran.
+                transactions.value = transSnapshot.docs.map(doc => normalizeTransaction({ id: doc.id, ...doc.data() }));
                 exchangeRates.value = ratesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
                 console.log(`useAccountingData: Cargadas ${transactions.value.length} transacciones y ${exchangeRates.value.length} tasas desde Firestore.`);
             } else {
-                transactions.value = JSON.parse(localStorage.getItem(TRANSACTIONS_STORAGE_KEY) || '[]');
+                transactions.value = JSON.parse(localStorage.getItem(TRANSACTIONS_STORAGE_KEY) || '[]').map(normalizeTransaction);
                 exchangeRates.value = JSON.parse(localStorage.getItem(RATES_STORAGE_KEY) || '[]');
                 exchangeRates.value.sort((a, b) => new Date(b.date) - new Date(a.date));
                 transactions.value.sort((a, b) => new Date(b.date) - new Date(a.date) || (new Date(b.createdAt || 0)) - (new Date(a.createdAt || 0)));
@@ -151,25 +175,33 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
     }
 
 
-    // --- Lógica de Obtención de Tasas (Sin cambios) ---
+    // --- Lógica de Obtención de Tasas ---
     async function getRatesFromApi(specificDate = null) {
         const now = new Date();
-        const dateToFetch = specificDate || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const todayString = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const dateToFetch = specificDate || todayString;
 
         // 1. VERIFICAR SI YA EXISTE EN LA BASE DE DATOS (FIREBASE)
-        // Usamos la función que ya tienes para buscar en el estado local/sincronizado
-        const existingRate = getRateForExactDate(dateToFetch);
+        const existingRates = getRatesForExactDate(dateToFetch);
+        const cached = existingRates && existingRates.bcv ? existingRates : null;
+        // OJO: "tengo la del BCV" ya NO alcanza para dar la caché por buena — era
+        // cierto cuando existía una sola tasa. Los registros guardados antes de la
+        // multimoneda (y los de hoy, si se creó antes de este cambio) traen sólo
+        // el BCV, y quedarse con ellos dejaba EUR y USDT en null para siempre.
+        const cacheIsComplete = cached && cached.eur && cached.binance;
 
-        if (existingRate) {
-            console.log(`[Caché] Tasa encontrada en base de datos para ${dateToFetch}: ${existingRate}`);
-            return [{ usd: existingRate, date: dateToFetch, source: 'Firebase' }];
+        // Se sale por caché si está completa, o si la fecha NO es hoy: la API no
+        // tiene histórico, así que completar una fecha pasada con las tasas de hoy
+        // sería atribuirle valores que no le corresponden. Para esas fechas, la
+        // carga manual del modal es el camino correcto.
+        if (cached && (cacheIsComplete || dateToFetch !== todayString)) {
+            console.log(`[Caché] Tasas encontradas en base de datos para ${dateToFetch}:`, cached);
+            return [{ rates: cached, usd: cached.bcv, date: dateToFetch, source: 'Firebase' }];
         }
 
-        // 2. SI NO EXISTE, CONSULTAR LA API PÚBLICA. Ojo: dolarflashve.eu/api/rates/all
-        // sólo expone la tasa vigente "ahora mismo" (bcvUsd.rate), no admite consultar
-        // fechas pasadas — para fechas históricas ya guardadas, el chequeo de caché de
-        // arriba es el único mecanismo real; una fecha pasada nunca antes consultada
-        // recibirá la tasa de hoy.
+        // 2. SI FALTA ALGO, CONSULTAR LA API PÚBLICA. Ojo: dolarflashve.eu/api/rates/all
+        // sólo expone las tasas vigentes "ahora mismo", no admite consultar fechas
+        // pasadas — una fecha pasada nunca antes consultada recibirá las de hoy.
         rateFetchingLoading.value = true;
         accountingError.value = null;
 
@@ -190,17 +222,29 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             }
 
             const data = await response.json();
+            // La API expone bcvUsd, bcvEur, binanceBuy y binanceSell. USDT no
+            // viene dado: parseApiRates promedia compra y venta de Binance.
+            const parsed = parseApiRates(data);
 
-            if (data && data.bcvUsd && data.bcvUsd.rate) {
-                const rateValue = parseFloat(data.bcvUsd.rate);
+            if (parsed.bcv) {
+                // 3. GUARDAR AUTOMÁTICAMENTE PARA FUTURAS CONSULTAS.
+                // Si ya había algo guardado para esta fecha se COMPLETA lo que falta
+                // en vez de pisarlo: una tasa cargada a mano (típicamente cuando la
+                // API venía mal o caída) no debe perderse porque la app se recargó.
+                const toSave = cached
+                    ? {
+                        bcv: cached.bcv,
+                        eur: cached.eur || parsed.eur,
+                        binance: cached.binance || parsed.binance,
+                    }
+                    : parsed;
 
-                // 3. GUARDAR AUTOMÁTICAMENTE EN FIREBASE PARA FUTURAS CONSULTAS
-                // Usamos updateDailyRate que ya maneja la lógica de guardado y historial
-                console.log(`[Registro] Guardando nueva tasa en base de datos: ${rateValue} para ${dateToFetch}`);
-                await updateDailyRate(rateValue, dateToFetch);
+                console.log(`[Registro] Guardando tasas en base de datos para ${dateToFetch}:`, toSave);
+                await updateDailyRate(toSave, dateToFetch);
 
                 return [{
-                    usd: rateValue,
+                    rates: toSave,
+                    usd: toSave.bcv,
                     date: dateToFetch,
                     source: 'BCV'
                 }];
@@ -209,6 +253,13 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             }
         } catch (error) {
             console.error("Error en el flujo de tasa de cambio:", error);
+            // Se llegó acá con caché parcial (faltaba EUR o USDT) y la API falló:
+            // vale más la tasa BCV que ya estaba guardada que quedarse sin nada.
+            // Las que falten se cargan a mano desde el modal o la tarjeta de tasas.
+            if (cached) {
+                console.warn(`[Caché] API no disponible; se usan las tasas guardadas para ${dateToFetch}.`);
+                return [{ rates: cached, usd: cached.bcv, date: dateToFetch, source: 'Firebase' }];
+            }
             accountingError.value = "No se pudo obtener ni guardar la tasa de cambio.";
             return [];
         } finally {
@@ -217,16 +268,13 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
     }
 
     async function fetchAndUpdateBCVRate() {
-        // Ahora getRatesFromApi ya busca la tasa de "hoy" por defecto
+        // Ahora getRatesFromApi ya busca las tasas de "hoy" por defecto
         const ratesList = await getRatesFromApi();
 
         if (ratesList.length > 0) {
-            const latestRateData = ratesList[0];
-            const rateValue = latestRateData.usd;
-            const rateDate = latestRateData.date;
-
-            // Actualizamos la base de datos de Firebase con la nueva tasa
-            const success = await updateDailyRate(rateValue, rateDate);
+            const latest = ratesList[0];
+            // Actualizamos la base de datos de Firebase con el juego completo
+            const success = await updateDailyRate(latest.rates, latest.date);
             return success;
         }
         return false;
@@ -244,6 +292,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             const rateData = ratesList[0];
             specificDateRateError.value = null;
             return {
+                rates: rateData.rates,
                 rate: rateData.usd,
                 dateFound: rateData.date,
                 error: null
@@ -251,24 +300,32 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         }
 
         specificDateRateError.value = `No se pudo obtener tasa para la fecha ${dateStringYYYYMMDD}.`;
-        return { rate: null, dateFound: null, error: specificDateRateError.value };
+        return { rates: null, rate: null, dateFound: null, error: specificDateRateError.value };
     }
 
+    // Las funciones que devuelven un número suelto siguen entregando SÓLO la tasa
+    // BCV (compatibilidad con lo que ya las llamaba). Las que terminan en
+    // "...Rates..." devuelven el juego completo {bcv, eur, binance}, que es lo
+    // que necesita cualquier cosa que trabaje con EUR o USDT.
     function getRateForDate(targetDateString) {
         if (!exchangeRates.value || exchangeRates.value.length === 0) {
             return null;
         }
         exchangeRates.value.sort((a, b) => new Date(b.date) - new Date(a.date)); // Asegurar orden
         const foundRate = exchangeRates.value.find(rate => rate.date <= targetDateString);
-        return foundRate ? foundRate.rate : null;
+        return foundRate ? normalizeRateEntry(foundRate).bcv : null;
     }
     function getRateForExactDate(targetDateString) {
+        return getRatesForExactDate(targetDateString)?.bcv ?? null;
+    }
+
+    function getRatesForExactDate(targetDateString) {
         if (!exchangeRates.value || exchangeRates.value.length === 0) {
             return null;
         }
         // Busca una coincidencia exacta de fecha, sin usar "<="
-        const foundRate = exchangeRates.value.find(rate => rate.date === targetDateString);
-        return foundRate ? foundRate.rate : null;
+        const found = exchangeRates.value.find(rate => rate.date === targetDateString);
+        return found ? normalizeRateEntry(found) : null;
     }
 
     function getLatestRateDataBefore(targetDateString) {
@@ -280,18 +337,31 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
 
         // Buscamos la primera tasa que sea en o antes de la fecha objetivo
         const foundRateData = sortedRates.find(rate => rate.date <= targetDateString);
+        if (!foundRateData) return null;
 
-        return foundRateData || null; // Devuelve el objeto completo o null
+        // Se conserva `rate` (número) por compatibilidad y se agrega el juego completo.
+        const rates = normalizeRateEntry(foundRateData);
+        return { ...foundRateData, rate: rates.bcv, rates };
     }
 
     // --- INICIO REFACTOR 1.3 ---
-    async function updateDailyRate(rateValue, dateString = null) {
-        const rate = Number(rateValue);
-        if (isNaN(rate) || rate <= 0) {
-            accountingError.value = "La tasa de cambio debe ser un número positivo.";
-            console.error("updateDailyRate: Tasa inválida:", rateValue);
-            return false;
-        }
+    /**
+     * @param {number|{bcv?:number, eur?:number, binance?:number}} rateInput
+     *   Un número se interpreta como la tasa BCV sola (así la llaman el botón
+     *   "Manual" y el modal de transacción). Un objeto permite guardar el juego
+     *   completo. Las tasas que vengan vacías NO borran lo ya guardado para esa
+     *   fecha: se mezclan, para que un ajuste manual del BCV no tumbe el EUR o
+     *   el USDT que la API sí había traído.
+     */
+    async function updateDailyRate(rateInput, dateString = null) {
+        const incoming = typeof rateInput === 'object' && rateInput !== null
+            ? rateInput
+            : { bcv: rateInput };
+
+        const asRate = (v) => {
+            const n = Number(v);
+            return Number.isFinite(n) && n > 0 ? n : null;
+        };
 
         let resolvedTargetDateString;
         if (dateString) {
@@ -304,18 +374,45 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
             resolvedTargetDateString = `${year}-${month}-${day}`;
         }
 
+        const originalRateEntry = exchangeRates.value.find(r => r.id === resolvedTargetDateString);
+        const previous = normalizeRateEntry(originalRateEntry);
+
+        const merged = {
+            bcv: asRate(incoming.bcv) ?? previous.bcv,
+            eur: asRate(incoming.eur) ?? previous.eur,
+            binance: asRate(incoming.binance) ?? previous.binance,
+        };
+
+        if (!merged.bcv) {
+            accountingError.value = "La tasa de cambio debe ser un número positivo.";
+            console.error("updateDailyRate: Tasa BCV inválida:", rateInput);
+            return false;
+        }
+
         const rateEntry = {
             id: resolvedTargetDateString,
             date: resolvedTargetDateString,
-            rate: rate,
+            // `rate` se sigue escribiendo con el valor BCV: es lo que leen los
+            // documentos y el código anteriores a la multimoneda.
+            rate: merged.bcv,
+            rateBcv: merged.bcv,
+            rateEur: merged.eur,
+            rateBinance: merged.binance,
             timestamp: user.value ? serverTimestamp() : new Date().toISOString(),
             userId: user.value ? user.value.uid : null,
         };
 
-        const originalRateEntry = exchangeRates.value.find(r => r.id === resolvedTargetDateString);
-        const originalRateValue = originalRateEntry ? originalRateEntry.rate : null;
+        const RATE_LABELS = { bcv: 'Tasa BCV (Bs/USD)', eur: 'Tasa BCV (Bs/EUR)', binance: 'Tasa USDT (Bs/USDT)' };
+        const rateChanges = ['bcv', 'eur', 'binance']
+            .filter(key => previous[key] !== merged[key])
+            .map(key => ({
+                field: key === 'bcv' ? 'rate' : (key === 'eur' ? 'rateEur' : 'rateBinance'),
+                oldValue: previous[key],
+                newValue: merged[key],
+                label: RATE_LABELS[key],
+            }));
 
-        if (originalRateEntry && originalRateEntry.rate === rate) {
+        if (originalRateEntry && rateChanges.length === 0) {
             _updateCurrentDailyRate();
             return true;
         }
@@ -341,12 +438,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
                 entityType: 'Tasa de Cambio',
                 entityId: resolvedTargetDateString,
                 entityName: `Tasa del ${resolvedTargetDateString}`,
-                changes: [{
-                    field: 'rate',
-                    oldValue: originalRateValue,
-                    newValue: rate,
-                    label: 'Tasa (Bs/USD)'
-                }]
+                changes: rateChanges
             }, batch).then(() => {
                 batch.commit().then(() => {
                     console.log(`Sincronización (updateDailyRate ${resolvedTargetDateString}) exitosa.`);
@@ -390,45 +482,65 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
                 entityType: 'Tasa de Cambio',
                 entityId: resolvedTargetDateString,
                 entityName: `Tasa del ${resolvedTargetDateString}`,
-                changes: [{
-                    field: 'rate',
-                    oldValue: originalRateValue,
-                    newValue: rate,
-                    label: 'Tasa (Bs/USD)'
-                }]
+                changes: rateChanges
             });
             accountingError.value = null;
             return true;
         }
     }
 
+    /**
+     * Arma el cuerpo multimoneda de un movimiento a partir de lo que manda el
+     * modal. Devuelve { entry } o { error }.
+     *
+     * El snapshot de tasas (rate*Applied) es deliberado: un movimiento viejo NO
+     * debe cambiar de valor porque cambió la tasa de hoy. Por eso amountUsdBcv
+     * se congela acá y nunca se recalcula al leer.
+     */
+    function _buildTransactionBody(entryData) {
+        const amount = Number(entryData.amountOriginal);
+        if (isNaN(amount) || amount <= 0) {
+            return { error: "El monto debe ser positivo." };
+        }
+
+        const currency = entryData.currencyOriginal || 'VES';
+        const rates = entryData.rates || {};
+        const amountUsdBcv = toUsdBcv(amount, currency, rates);
+
+        if (amountUsdBcv === null) {
+            return { error: `Faltan tasas de cambio para registrar un movimiento en ${currency} con fecha ${entryData.date}.` };
+        }
+
+        return {
+            entry: {
+                type: entryData.type,
+                date: entryData.date,
+                description: entryData.description,
+                category: entryData.category || 'General',
+                amountOriginal: amount,
+                currencyOriginal: currency,
+                rateBcvApplied: rates.bcv ?? null,
+                rateEurApplied: rates.eur ?? null,
+                rateBinanceApplied: rates.binance ?? null,
+                amountUsdBcv: Number(amountUsdBcv.toFixed(6)),
+                notes: entryData.notes || '',
+            },
+        };
+    }
+
     async function addTransaction(entryData) {
         accountingError.value = null;
-        if (!entryData.date || !entryData.description || !entryData.amountBs || !entryData.type) {
+        if (!entryData.date || !entryData.description || !entryData.amountOriginal || !entryData.type) {
             accountingError.value = "Faltan campos requeridos para la transacción."; return null;
         }
-        const amountBs = Number(entryData.amountBs);
-        if (isNaN(amountBs) || amountBs <= 0) {
-            accountingError.value = "Monto en Bs. debe ser positivo."; return null;
-        }
-        const rateToUse = Number(entryData.exchangeRate);
-        if (isNaN(rateToUse) || rateToUse <= 0) {
-            accountingError.value = `Tasa de cambio inválida o no provista para la fecha ${entryData.date}. (${entryData.exchangeRate})`;
-            return null;
-        }
 
-        const calculatedAmountUsd = amountBs / rateToUse;
-        const amountUsd = parseFloat(calculatedAmountUsd.toFixed(2));
+        const { entry, error } = _buildTransactionBody(entryData);
+        if (error) {
+            accountingError.value = error; return null;
+        }
 
         const transactionEntry = {
-            type: entryData.type,
-            date: entryData.date,
-            description: entryData.description,
-            category: entryData.category || 'General',
-            amountBs: amountBs,
-            exchangeRate: rateToUse,
-            amountUsd: amountUsd,
-            notes: entryData.notes || '',
+            ...entry,
             createdAt: user.value ? serverTimestamp() : new Date().toISOString(),
             updatedAt: user.value ? serverTimestamp() : new Date().toISOString(),
             userId: user.value ? user.value.uid : null
@@ -526,23 +638,22 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         }
         // 1. Guardar estado original y ejecutar actualización optimista
         const originalTransaction = JSON.parse(JSON.stringify(transactions.value[index]));
-        const amountBs = Number(updatedEntryData.amountBs);
-        if (isNaN(amountBs) || amountBs <= 0) {
-            accountingError.value = "Monto en Bs. debe ser positivo."; return false;
+
+        const { entry, error } = _buildTransactionBody(updatedEntryData);
+        if (error) {
+            accountingError.value = error; return false;
         }
-        const rateToUse = Number(updatedEntryData.exchangeRate);
-        if (isNaN(rateToUse) || rateToUse <= 0) {
-            accountingError.value = `Tasa de cambio inválida o no provista (${updatedEntryData.exchangeRate}).`; return false;
-        }
-        const amountUsd = parseFloat((amountBs / rateToUse).toFixed(2));
+
         const finalTransactionData = {
             ...originalTransaction,
             ...updatedEntryData,
-            amountBs: amountBs,
-            exchangeRate: rateToUse,
-            amountUsd: amountUsd,
+            ...entry,
+            id: updatedEntryData.id,
             updatedAt: user.value ? serverTimestamp() : new Date().toISOString(),
         };
+        // `rates` es el juego de tasas que manda el modal para calcular, no un
+        // campo del documento: se queda fuera de lo que se persiste.
+        delete finalTransactionData.rates;
 
         // 2. Ejecutar actualización optimista de UI PRIMERO
         transactions.value.splice(index, 1, finalTransactionData);
@@ -704,13 +815,19 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         });
     }
 
+    /**
+     * Totales en la UNIDAD CANÓNICA (USD a tasa BCV). Es lo único que permite
+     * sumar movimientos cargados en monedas distintas: nunca totalizar sobre
+     * amountOriginal, que mezcla bolívares con dólares, euros y USDT.
+     * La vista convierte estos totales a la moneda que elija el usuario.
+     */
     function calculateSummary(filteredList) {
-        // ... (código existente, sin cambios)
         const summary = filteredList.reduce((acc, tx) => {
+            const amount = Number(tx.amountUsdBcv) || 0;
             if (tx.type === 'income') {
-                acc.totalIncome += tx.amountBs || 0;
+                acc.totalIncome += amount;
             } else if (tx.type === 'expense') {
-                acc.totalExpenses += tx.amountBs || 0;
+                acc.totalExpenses += amount;
             }
             return acc;
         }, { totalIncome: 0, totalExpenses: 0, netBalance: 0 });
@@ -762,6 +879,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         transactions,
         exchangeRates,
         currentDailyRate,
+        currentRates,
         accountingLoading,
         rateFetchingLoading,
         specificDateRateFetchingLoading,
@@ -770,6 +888,7 @@ export const useAccountingDataStore = defineStore('accountingData', () => {
         loadAccountingData,
         getRateForDate,
         getRateForExactDate,
+        getRatesForExactDate,
         getLatestRateDataBefore,
         updateDailyRate,
         addTransaction,

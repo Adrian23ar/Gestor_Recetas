@@ -72,6 +72,25 @@ const FIELD_LABELS = {
     'ingredient_added': 'Ingrediente Añadido',
     'ingredient_quantity_updated': 'Cantidad de Ingrediente',
     'ingredient_unit_updated': 'Unidad de Ingrediente',
+    // Contabilidad. `name` y `date` ya están arriba y significan lo mismo, así que
+    // no se repiten. Los tres primeros son de antes de la multimoneda: los eventos
+    // ya registrados los siguen nombrando así.
+    description: 'Descripción',
+    notes: 'Notas Adicionales',
+    category: 'Categoría',
+    type: 'Tipo Transacción',
+    amountBs: 'Monto (Bs.)',
+    exchangeRate: 'Tasa de Cambio (Bs/USD)',
+    amountUsd: 'Monto (USD)',
+    rate: 'Tasa BCV (Bs/USD)',
+    rateEur: 'Tasa BCV (Bs/EUR)',
+    rateBinance: 'Tasa USDT (Bs/USDT)',
+    amountOriginal: 'Monto',
+    currencyOriginal: 'Moneda',
+    amountUsdBcv: 'Equivalente (USD BCV)',
+    rateBcvApplied: 'Tasa BCV aplicada (Bs/USD)',
+    rateEurApplied: 'Tasa EUR aplicada (Bs/EUR)',
+    rateBinanceApplied: 'Tasa USDT aplicada (Bs/USDT)',
 };
 
 /**
