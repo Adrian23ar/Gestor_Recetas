@@ -2,8 +2,13 @@
 import { ref, computed, watch } from 'vue';
 import { RouterLink, RouterView } from 'vue-router';
 import { useAuth } from './composables/useAuth';
+import { useTutorialLauncher } from './composables/useTutorial';
 
 const { user, authLoading, signInWithGoogle, signOutUser } = useAuth();
+
+// La vista montada registra su propio tutorial; el botón "?" sólo aparece
+// cuando hay uno disponible.
+const { activeTour, start: startTutorial } = useTutorialLauncher();
 
 const isDarkMode = ref(false);
 const isUserMenuOpen = ref(false);
@@ -86,8 +91,18 @@ async function handleSignOut() {
           </RouterLink>
         </nav>
 
-        <!-- Derecha: tema + usuario -->
+        <!-- Derecha: tutorial + tema + usuario -->
         <div class="flex items-center gap-2">
+          <button v-if="activeTour" type="button" @click="startTutorial" aria-label="Ver el tutorial de esta sección"
+            title="Ver el tutorial de esta sección"
+            class="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-control text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200">
+            <svg class="h-5 w-5 fill-current" viewBox="0 0 20 20">
+              <path fill-rule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z"
+                clip-rule="evenodd" />
+            </svg>
+          </button>
+
           <button type="button" @click="toggleDarkMode" aria-label="Cambiar tema"
             class="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-control text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200">
             <svg v-if="isDarkMode" class="h-5 w-5 fill-current" viewBox="0 0 20 20">

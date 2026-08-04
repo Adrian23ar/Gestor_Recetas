@@ -36,3 +36,48 @@ const EVENT_META = {
 export function getEventMeta(eventType) {
     return EVENT_META[eventType] || { label: eventType || 'Evento', tone: 'neutral' };
 }
+
+// Traducción de nombres de campo mostrados en "Cambios detallados". Antes vivía
+// solo en src/stores/userData.js (usada al escribir `change.label`) — se movió
+// acá para poder usarla también como fallback al LEER entradas históricas que
+// se guardaron con un `label` ausente o en inglés (ver EventDetailsModal.vue /
+// EventHistoryView.vue), sin duplicar el diccionario.
+const FIELD_LABELS = {
+    name: 'Nombre',
+    cost: 'Costo de Presentación',
+    presentationSize: 'Tamaño de Presentación',
+    unit: 'Unidad',
+    currentStock: 'Stock Actual',
+    ingredients: 'Ingredientes',
+    packagingCostPerBatch: 'Costo de Empaque/Lote',
+    laborCostPerBatch: 'Mano de Obra/Lote',
+    itemsPerBatch: 'Items por Lote',
+    profitMarginPercent: '% Margen de Ganancia',
+    lossBufferPercent: '% Margen de Pérdida',
+    productName: 'Nombre del Producto',
+    batchSize: 'Tamaño del Lote (Cantidad)',
+    date: 'Fecha',
+    netProfit: 'Ganancia Neta',
+    recipeId: 'Receta Asociada',
+    totalRevenue: 'Ingresos Totales',
+    totalCost: 'Costo Total de Producción',
+    operatingCostRecipeOnly: 'Gastos Op. (Ingr. + Emp.)',
+    laborCostForBatch: 'Costo Mano de Obra (Lote)',
+    isSold: 'Vendido',
+    calculatedRecipeOnlyCost: 'Costo Base de Receta (Calculado)',
+    calculatedTotalBatchCostAllIncluded: 'Costo Total del Lote (Calculado)',
+    calculatedFinalPrice: 'Precio Final (Calculado)',
+    // Etiquetas para cambios de ingredientes (de getIngredientChangeDetails)
+    'ingredient_removed': 'Ingrediente Eliminado',
+    'ingredient_added': 'Ingrediente Añadido',
+    'ingredient_quantity_updated': 'Cantidad de Ingrediente',
+    'ingredient_unit_updated': 'Unidad de Ingrediente',
+};
+
+/**
+ * @param {string} key
+ * @returns {string}
+ */
+export function getFieldLabel(key) {
+    return FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+}

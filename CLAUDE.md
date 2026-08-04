@@ -19,7 +19,8 @@ cambio USD/Bs.), e historial de eventos (auditoría de cambios). Toda la UI est�
   puenteado a `src/assets/style.css` con `@config`. **`important: true` está activado
   deliberadamente** — ver gotchas abajo.
 - vue-toastification (toasts), @vueform/multiselect (selects), @vuepic/vue-datepicker v14
-  (date pickers), date-fns (requerido directamente para el locale del datepicker)
+  (date pickers), date-fns (requerido directamente para el locale del datepicker),
+  driver.js (tutoriales guiados)
 
 ## Estructura
 
@@ -55,6 +56,25 @@ referencia si hay que tocar UI otra vez. Resumen rápido:
   `<Transition name="modal-transition">` (scale+fade); `RecipeDrawer` usa
   `<Transition name="drawer-transition">` (desliza desde la derecha) — son bloques CSS
   independientes en `style.css`, no los fusiones aunque se parezcan.
+
+## Tutoriales guiados
+
+Cada vista tiene un tutorial paso a paso (driver.js), más uno específico dentro de `RecipeDrawer`
+que explica de dónde sale el precio (mano de obra, margen, buffer).
+
+- `src/composables/useTutorial.js` — la capa sobre driver.js. `useViewTutorial(tour, ready)` en
+  el `<script setup>` de la vista registra su tour (el botón `?` del header lo dispara) y lo abre
+  solo la primera vez, cuando `ready` pasa a true. `startTour()` suelto es para tours que no son
+  de una vista (el de `RecipeDrawer`).
+- `src/utils/tourSteps.js` — todo el texto, una función por vista. Se ejecutan al ABRIR el
+  tutorial, no al importarlas, para poder leer el estado real.
+- `src/composables/tutorialDriver.js` — chunk lazy con la librería + su CSS.
+- Los anclajes son atributos `data-tour="..."` en las plantillas. **Si mueves o borras uno,
+  actualiza `tourSteps.js`** — en dev queda un `console.warn` cuando un selector no encuentra nada.
+- **Estados vacíos:** un paso con `optional: true` se descarta si su elemento no está visible, y
+  con `when: () => bool` se descarta por condición de datos. Los pasos SIN esas marcas se
+  conservan aunque su elemento no exista todavía (los de la pestaña de costos del drawer aparecen
+  recién cuando el paso anterior cambia de pestaña con `onNext`).
 
 ## Gotchas importantes (aprendidos a la fuerza en la sesión del 2026-08-01)
 
@@ -97,7 +117,13 @@ referencia si hay que tocar UI otra vez. Resumen rápido:
    normalizando ambos con `?? null`, el caso "sin dato inicial" (`null !== null`) se evalúa
    `false` y el callback nunca corre. Si necesitás que corra siempre en el mount, chequeá
    `oldValue === undefined` explícitamente además de la comparación de IDs.
-7. **Dos stores paralelos con el mismo shape**: `src/stores/userData.js` y
+7. **driver.js — dos trampas.** (a) Si defines `onNextClick`/`onPrevClick` en un paso, la
+   librería **deja de avanzar sola**: el hook reemplaza el comportamiento por defecto y hay que
+   llamar a `moveNext()`/`movePrevious()` a mano (así es como el tour del drawer cambia de
+   pestaña antes de seguir). (b) El contador de progreso (`{{total}}`) se calcula sobre el array
+   de pasos completo, aunque después la librería salte pasos con `skipMissingElement` — por eso
+   `resolveSteps()` filtra ANTES de instanciar el driver, y no se delega en esa opción.
+8. **Dos stores paralelos con el mismo shape**: `src/stores/userData.js` y
    `src/stores/accountingData.js` son los reales (Pinia, usados por las vistas).
    `src/composables/useUserData.js` y `useAccountingData.js` son restos pre-Pinia sin uso —
    confirmá con grep de imports antes de asumir que un cambio en uno de los dos "composables"

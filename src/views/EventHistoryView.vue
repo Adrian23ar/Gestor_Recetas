@@ -5,7 +5,9 @@ import { db } from '../main';
 import { collection, getDocs, query, orderBy, limit, startAfter } from 'firebase/firestore';
 import EventDetailsModal from '../components/EventDetailsModal.vue';
 import ErrorMessage from '../components/ErrorMessage.vue';
-import { getEventMeta } from '../utils/eventLabels.js';
+import { getEventMeta, getFieldLabel } from '../utils/eventLabels.js';
+import { useViewTutorial } from '../composables/useTutorial.js';
+import { historyTour } from '../utils/tourSteps.js';
 
 const { user } = useAuth();
 const localHistoryEntries = ref([]);
@@ -17,6 +19,15 @@ const PAGE_SIZE = 100;
 const lastVisibleDoc = ref(null);
 const allDataLoaded = ref(false);
 const searchQuery = ref('');
+
+const DATE_FILTERS = [
+    { key: 'all', label: 'Todos' },
+    { key: 'day', label: 'Hoy' },
+    { key: 'week', label: 'Esta semana' },
+    { key: 'month', label: 'Este mes' },
+    { key: '3months', label: 'Últimos 3 meses' },
+];
+const dateFilter = ref('all');
 
 let isCurrentlyLoading = false;
 
@@ -49,6 +60,31 @@ function isSameDay(a, b) {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+function startOfWeek(date) {
+    const d = new Date(date);
+    const day = d.getDay(); // 0 (dom) .. 6 (sáb)
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diffToMonday);
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+function matchesDateFilter(entry, filterKey) {
+    if (filterKey === 'all') return true;
+    const date = toDate(entry.timestamp);
+    if (!date) return false;
+    const now = new Date();
+    if (filterKey === 'day') return isSameDay(date, now);
+    if (filterKey === 'week') return date >= startOfWeek(now);
+    if (filterKey === 'month') return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+    if (filterKey === '3months') {
+        const cutoff = new Date(now);
+        cutoff.setMonth(cutoff.getMonth() - 3);
+        return date >= cutoff;
+    }
+    return true;
+}
+
 function getDateGroupLabel(date) {
     const now = new Date();
     const yesterday = new Date(now);
@@ -71,7 +107,7 @@ function buildDescription(entry) {
     const entityPart = entry.entityName || entry.entityType || '';
     if (Array.isArray(entry.changes) && entry.changes.length > 0) {
         const first = entry.changes[0];
-        const label = first.label || first.field;
+        const label = first.label || getFieldLabel(first.field);
         const summary = `${label} ${summarizeValue(first.oldValue)} → ${summarizeValue(first.newValue)}`;
         return entityPart ? `${entityPart} — ${summary}` : summary;
     }
@@ -88,12 +124,13 @@ function badgeClass(eventType) {
 
 const filteredEntries = computed(() => {
     const q = searchQuery.value.trim().toLowerCase();
-    if (!q) return localHistoryEntries.value;
-    return localHistoryEntries.value.filter(entry =>
-        buildDescription(entry).toLowerCase().includes(q) ||
-        getEventMeta(entry.eventType).label.toLowerCase().includes(q) ||
-        (entry.entityName || '').toLowerCase().includes(q)
-    );
+    return localHistoryEntries.value.filter(entry => {
+        if (!matchesDateFilter(entry, dateFilter.value)) return false;
+        if (!q) return true;
+        return buildDescription(entry).toLowerCase().includes(q) ||
+            getEventMeta(entry.eventType).label.toLowerCase().includes(q) ||
+            (entry.entityName || '').toLowerCase().includes(q);
+    });
 });
 
 const groupedHistory = computed(() => {
@@ -112,6 +149,11 @@ const groupedHistory = computed(() => {
     }
     return groups;
 });
+
+useViewTutorial(
+    { id: 'historial', getSteps: () => historyTour({ hasEntries: groupedHistory.value.length > 0 }) },
+    () => !historyLoading.value && !historyError.value,
+);
 
 // --- Carga (conservada): paginación por cursor de Firestore + fallback a localStorage ---
 async function loadHistory(isLoadMore = false) {
@@ -199,6 +241,13 @@ onUnmounted(() => {
             <input v-model="searchQuery" type="search" placeholder="Buscar en el historial…" class="ui-input-sm w-full max-w-[240px]" />
         </div>
 
+        <div data-tour="history-filters" class="flex flex-wrap gap-1.5">
+            <button v-for="filter in DATE_FILTERS" :key="filter.key" type="button"
+                :class="dateFilter === filter.key ? 'ui-chip-active' : 'ui-chip'" @click="dateFilter = filter.key">
+                {{ filter.label }}
+            </button>
+        </div>
+
         <ErrorMessage v-if="historyError" :message="historyError" />
 
         <template v-else>
@@ -213,28 +262,28 @@ onUnmounted(() => {
             <div v-else-if="groupedHistory.length === 0" class="ui-empty">
                 <h3 class="text-base font-semibold text-stone-700 dark:text-stone-200">Sin eventos</h3>
                 <p class="mt-1.5 max-w-sm text-sm text-stone-500 dark:text-stone-400">
-                    {{ searchQuery ? 'Ningún evento coincide con tu búsqueda.' : 'Todavía no hay eventos registrados.' }}
+                    {{ searchQuery || dateFilter !== 'all' ? 'Ningún evento coincide con tu búsqueda o filtro.' : 'Todavía no hay eventos registrados.' }}
                 </p>
             </div>
 
-            <div v-else class="ui-card overflow-hidden">
+            <div v-else data-tour="history-list" class="ui-card overflow-hidden">
                 <template v-for="group in groupedHistory" :key="group.label">
                     <div class="bg-surface-muted px-5 py-2 text-xs font-semibold text-stone-500 dark:bg-stone-900/60 dark:text-stone-400">
                         {{ group.label }}
                     </div>
                     <div v-for="entry in group.entries" :key="entry.id"
-                        class="flex flex-wrap items-center gap-3 border-t border-stone-100 px-5 py-3.5 max-[640px]:items-start dark:border-stone-800">
+                        class="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-stone-100 px-5 py-3.5 max-[640px]:px-4 max-[640px]:py-3 dark:border-stone-800">
                         <span class="w-[56px] shrink-0 tabular-nums text-xs text-stone-400">{{ formatTime(entry.timestamp) }}</span>
                         <span :class="badgeClass(entry.eventType)" class="shrink-0">{{ getEventMeta(entry.eventType).label }}</span>
                         <span class="min-w-0 flex-1 truncate text-sm text-stone-700 max-[640px]:order-last max-[640px]:w-full max-[640px]:basis-full max-[640px]:whitespace-normal dark:text-stone-300">
                             {{ buildDescription(entry) }}
                         </span>
-                        <button type="button" class="ui-btn-subtle shrink-0" @click="showDetails(entry)">Ver detalle</button>
+                        <button type="button" class="ui-btn-subtle shrink-0 max-[640px]:ml-auto" @click="showDetails(entry)">Ver detalle</button>
                     </div>
                 </template>
             </div>
 
-            <div v-if="!allDataLoaded && !historyLoading && groupedHistory.length > 0" class="flex justify-center">
+            <div v-if="!allDataLoaded && !historyLoading && groupedHistory.length > 0" data-tour="history-loadmore" class="flex justify-center">
                 <button type="button" class="ui-btn-outline" @click="loadHistory(true)">Cargar más eventos</button>
             </div>
             <p v-else-if="allDataLoaded && groupedHistory.length > 0" class="text-center text-xs text-stone-400">

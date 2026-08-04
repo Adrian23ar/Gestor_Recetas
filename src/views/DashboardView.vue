@@ -8,6 +8,8 @@ import AddRecipeModal from '../components/AddRecipeModal.vue';
 import RecipeDrawer from '../components/RecipeDrawer.vue';
 import ConfirmationModal from '../components/ConfirmationModal.vue';
 import ErrorMessage from '../components/ErrorMessage.vue';
+import { useViewTutorial } from '../composables/useTutorial.js';
+import { dashboardTour } from '../utils/tourSteps.js';
 
 const router = useRouter();
 
@@ -64,6 +66,11 @@ const filteredRecipes = computed(() => {
 const lowStockIngredients = computed(() =>
   globalIngredients.value.filter(ing => ing.stockPercent !== null && ing.stockPercent !== undefined && ing.stockPercent <= 60)
 );
+
+useViewTutorial(
+  { id: 'recetas', getSteps: () => dashboardTour({ hasRecipes: recipes.value.length > 0 }) },
+  () => !dataLoading.value && !dataError.value,
+);
 </script>
 
 <template>
@@ -78,14 +85,14 @@ const lowStockIngredients = computed(() =>
       <div class="flex items-center gap-2 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch">
         <input v-model="searchQuery" type="search" placeholder="Buscar receta…"
           class="ui-input-sm w-full max-w-[200px] max-[640px]:max-w-none" />
-        <button type="button" class="ui-btn-primary shrink-0 max-[640px]:w-full" @click="openAddRecipeModal">Nueva receta</button>
+        <button type="button" data-tour="recipes-new" class="ui-btn-primary shrink-0 max-[640px]:w-full" @click="openAddRecipeModal">Nueva receta</button>
       </div>
     </div>
 
     <ErrorMessage v-if="dataError" :message="dataError" />
 
     <template v-else>
-      <div v-if="lowStockIngredients.length > 0" class="rounded-box border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/25 dark:bg-amber-500/10">
+      <div v-if="lowStockIngredients.length > 0" data-tour="recipes-lowstock" class="rounded-box border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/25 dark:bg-amber-500/10">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0">
             <p class="text-sm font-semibold text-amber-800 dark:text-amber-300">Ingredientes con stock bajo</p>
@@ -101,7 +108,7 @@ const lowStockIngredients = computed(() =>
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-1.5">
+      <div data-tour="recipes-filters" class="flex flex-wrap gap-1.5">
         <button type="button" :class="activeChip === 'all' ? 'ui-chip-active' : 'ui-chip'" @click="activeChip = 'all'">
           Todas · <span class="tabular-nums">{{ recipes.length }}</span>
         </button>
@@ -123,7 +130,7 @@ const lowStockIngredients = computed(() =>
         </div>
       </div>
 
-      <div v-else-if="recipes.length === 0" class="ui-empty">
+      <div v-else-if="recipes.length === 0" data-tour="recipes-empty" class="ui-empty">
         <h3 class="text-base font-semibold text-stone-700 dark:text-stone-200">Aún no tienes recetas</h3>
         <p class="mt-1.5 max-w-sm text-sm text-stone-500 dark:text-stone-400">
           Crea tu primera receta para empezar a calcular precios y registrar producción. Si vas a usarla necesitarás
@@ -141,7 +148,8 @@ const lowStockIngredients = computed(() =>
       </div>
 
       <TransitionGroup v-else tag="div" name="card-list" class="grid gap-5" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));">
-        <RecipeCard v-for="recipe in filteredRecipes" :key="recipe.id" :recipe="recipe" :globalIngredients="globalIngredients"
+        <RecipeCard v-for="(recipe, index) in filteredRecipes" :key="recipe.id" :recipe="recipe" :globalIngredients="globalIngredients"
+          :data-tour="index === 0 ? 'recipes-card' : null"
           @delete-recipe="requestDeleteRecipeConfirmation" @edit-recipe="openEditRecipeModal(recipe)" />
       </TransitionGroup>
     </template>

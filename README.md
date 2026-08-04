@@ -1,115 +1,134 @@
 # Mi Pastelería App - Gestor de Recetas
 
-Esta es una aplicación web diseñada para la gestión integral de recetas, ingredientes, registros de producción y contabilidad básica, orientada a negocios de pastelería o similares. Permite calcular costos, precios de venta sugeridos, llevar un control del inventario, registrar transacciones financieras y monitorizar tasas de cambio.
+Aplicación web para la gestión integral de recetas, ingredientes, registros de producción y
+contabilidad básica, orientada a negocios de pastelería o similares. Permite calcular costos,
+precios de venta sugeridos, llevar control del inventario, registrar transacciones financieras y
+monitorizar tasas de cambio. Toda la interfaz está en español (Venezuela).
 
 ## Características Principales
 
 * **Gestión de Recetas:**
     * Crear, editar, eliminar y visualizar recetas detalladas.
     * Asociar ingredientes con cantidades y unidades específicas.
-    * Cálculo automático de costos por receta/lote.
-    * Sugerencia de precio de venta final basado en márgenes de ganancia y pérdida.
+    * Cálculo automático de costos por receta/lote: el precio se recalcula solo cuando cambia el
+      costo de un ingrediente en el inventario.
+    * Sugerencia de precio de venta final basado en margen de ganancia y buffer de pérdida.
 * **Gestión de Ingredientes Globales:**
     * Añadir, editar y eliminar ingredientes con su costo, tamaño de presentación y unidad.
-    * Monitorizar el stock actual de cada ingrediente.
+    * Nivel de stock (alto / medio / bajo) calculado sobre el tamaño de la presentación.
 * **Registro de Producción:**
     * Documentar lotes de producción, asociándolos a recetas existentes.
-    * Descuento automático del stock de ingredientes utilizados.
+    * Descuento automático del stock de ingredientes utilizados (y restauración al eliminar el
+      registro).
     * Cálculo de ingresos totales, costos de producción y ganancia neta por lote.
-* **Módulo de Contabilidad (Nuevo):**
-    * Registro de transacciones de ingresos y egresos.
-    * Cálculo de montos en USD basado en tasas de cambio.
-    * Gestión de tasas de cambio diarias.
-    * Obtención automática de la tasa de cambio del BCV (Banco Central de Venezuela) para la fecha actual o fechas específicas.
-    * Filtrado y resumen de transacciones por fecha, tipo y categoría.
-* **Autenticación de Usuarios:**
-    * Inicio de sesión seguro utilizando Google Sign-In a través de Firebase Authentication.
-* **Persistencia de Datos:**
-    * Almacenamiento de datos (recetas, ingredientes, producción, contabilidad) en Firestore cuando el usuario está autenticado.
-    * Uso de `localStorage` como fallback o para usuarios no autenticados, permitiendo el uso offline o sin cuenta.
+* **Módulo de Contabilidad:**
+    * Registro de transacciones de ingresos y egresos en Bs. con su equivalente en USD.
+    * Gestión de tasas de cambio diarias, con obtención automática de la tasa del BCV y carga
+      manual como alternativa.
+    * Filtrado y resumen de transacciones por periodo y tipo.
 * **Historial de Eventos:**
-    * Registro detallado de acciones importantes realizadas en la aplicación (creación, edición, eliminación de recetas, ingredientes, producción, transacciones, tasas de cambio y ajustes de stock).
+    * Registro detallado de acciones importantes (creación, edición y eliminación de recetas,
+      ingredientes, producción, transacciones y tasas, además de los ajustes de stock).
+    * Búsqueda por texto y filtros por día, semana, mes y últimos 3 meses.
+* **Tutoriales guiados:**
+    * Un recorrido paso a paso por cada vista, que se abre solo en la primera visita y puede
+      reabrirse con el botón `?` de la barra superior.
+    * Un tutorial específico dentro de la ficha de receta que explica de dónde sale el precio:
+      mano de obra, items por lote, margen de ganancia y buffer de pérdida.
+    * Los pasos que apuntan a algo que no está en pantalla (estados vacíos, avisos condicionales)
+      se omiten automáticamente.
+* **Autenticación de Usuarios:**
+    * Inicio de sesión mediante Google Sign-In a través de Firebase Authentication.
+* **Persistencia de Datos:**
+    * Almacenamiento en Firestore cuando el usuario está autenticado, con **caché offline
+      habilitado** (`persistentLocalCache`): la app sigue funcionando sin conexión.
+    * Uso de `localStorage` como fallback para usuarios no autenticados.
 * **Interfaz de Usuario:**
-    * **Dashboard:** Vista principal con información relevante.
-    * **Ingredientes:** Sección para la gestión de ingredientes globales.
-    * **Registro de Producción:** Para ingresar nuevos lotes de producción.
-    * **Historial de Eventos:** Para auditar cambios en el sistema.
-    * **Contabilidad:** Nuevo módulo para la gestión financiera.
-    * Uso de DataTables con soporte responsivo para la visualización de datos tabulares.
-    * Notificaciones (Toast) para feedback al usuario (éxito, error, información) usando `vue-toastification`.
-    * Selección múltiple mejorada con `@vueform/multiselect`.
-    * Gráficos para visualización de datos (usando `chart.js` y `vue-chartjs`).
-    * Soporte para modo oscuro.
+    * **Recetas** (`/`), **Inventario** (`/ingredients`), **Producción** (`/register`),
+      **Contabilidad** (`/contabilidad`) e **Historial** (`/historial`).
+    * Diseño responsive desktop-first: las tablas se convierten en tarjetas expandibles en
+      móvil y la navegación pasa a una barra inferior fija.
+    * Soporte para modo claro y oscuro.
+    * Notificaciones (toasts) para feedback al usuario con `vue-toastification`.
 
 ## Tecnologías Utilizadas
 
-* **Framework Frontend:** Vue 3 (con Composition API)
+* **Framework Frontend:** Vue 3 (`<script setup>` en todos los componentes)
 * **Herramienta de Build:** Vite
-* **Estilos CSS:** Tailwind CSS (con configuración personalizada para temas claro/oscuro y paleta de colores)
+* **Estilos CSS:** Tailwind CSS v4 (vía `@tailwindcss/vite`, con config JS "legacy" puenteado
+  desde `src/assets/style.css`). Catálogo propio de clases `.ui-*` que centraliza los estilos y
+  sus variantes de modo oscuro.
 * **Enrutamiento:** Vue Router
-* **Gestión de Estado/Lógica Reutilizable:** Vue Composables (`useAuth`, `useUserData`, `useAccountingData`, `useEventHistory`, `useLocalStorage`)
+* **Gestión de Estado:** Pinia (`src/stores/`) + composables para la lógica de cada vista
 * **Backend y Base de Datos:** Firebase
     * Firebase Authentication (Google Sign-In)
-    * Firestore (Base de datos NoSQL en tiempo real)
-* **Visualización de Datos:**
-    * Chart.js
-    * vue-chartjs
-    * chartjs-plugin-datalabels
-* **Tablas de Datos:**
-    * DataTables.net
-    * datatables.net-vue3
-    * datatables.net-responsive-dt
+    * Firestore, con persistencia offline
 * **Componentes UI Adicionales:**
-    * @vueform/multiselect (para selects enriquecidos)
-* **Notificaciones:**
-    * vue-toastification
-* **Tipografía:**
-    * Inter (via Google Fonts)
+    * `@vueform/multiselect` (selects enriquecidos)
+    * `@vuepic/vue-datepicker` (selectores de fecha; requiere `date-fns` para el locale)
+    * `driver.js` (tutoriales guiados)
+* **Notificaciones:** `vue-toastification`
+* **Tipografía:** Nunito (vía Google Fonts)
 
 ## Estructura del Proyecto (Simplificada)
 
 ```text
 mi-pasteleria-app/
 ├── public/
-│   └── receta.ico             # Favicon (inferido de index.html)
 ├── src/
 │   ├── assets/
-│   │   └── style.css          # Estilos globales y de Tailwind
-│   ├── composables/           # Lógica reutilizable (Vue Composables)
+│   │   └── style.css          # Tailwind + catálogo de clases .ui-* y overrides de librerías
+│   ├── components/            # Modales y componentes de vista
+│   │   └── ui/                # Primitivas compartidas sin lógica de negocio
+│   │       ├── ResponsiveTable.vue
+│   │       └── DateField.vue
+│   ├── composables/           # Lógica reutilizable por vista
 │   │   ├── useAuth.js
+│   │   ├── useDashboard.js
+│   │   ├── useIngredients.js
+│   │   ├── useProductionRecords.js
+│   │   ├── useRecipeCosts.js  # Fórmula única de costeo de recetas
+│   │   ├── useDataTable.js
 │   │   ├── useEventHistory.js
 │   │   ├── useLocalStorage.js
+│   │   └── useTutorial.js     # Sistema de tutoriales guiados
 │   ├── router/
-│   │   └── index.js           # Configuración de rutas de Vue Router
-│   ├── stores/                # Gestores de estado globales (Pinia)
-│   │   ├── userData.js
-│   │   └── accountingData.js
-│   ├── views/                 # Componentes de página (Vistas)
-│   │   ├── AccountingView.vue
+│   │   └── index.js
+│   ├── stores/                # Fuente de verdad de los datos (Pinia)
+│   │   ├── userData.js        # Recetas, ingredientes y producción
+│   │   └── accountingData.js  # Transacciones y tasas de cambio
+│   ├── utils/                 # Helpers puros
+│   │   ├── utils.js
+│   │   ├── eventLabels.js     # Etiquetas de eventos y campos del historial
+│   │   └── tourSteps.js       # Contenido de los tutoriales
+│   ├── views/                 # Una vista por ruta
 │   │   ├── DashboardView.vue
-│   │   ├── EventHistoryView.vue
 │   │   ├── IngredientsView.vue
-│   │   └── RegisterView.vue   # Para el registro de producción
-│   ├── App.vue                # Componente raíz de la aplicación
-│   └── main.js                # Punto de entrada, inicialización de Vue, Pinia y Firebase
-├── .vscode/
-│   └── extensions.json      # Recomendaciones de extensiones para VS Code
-├── index.html               # Plantilla HTML principal
-├── package.json             # Dependencias y scripts del proyecto
-├── package-lock.json        # Lockfile de dependencias
-├── tailwind.config.js       # Configuración de Tailwind CSS
-├── vite.config.js           # Configuración de Vite
-└── README.md                # Este archivo
+│   │   ├── RegisterView.vue
+│   │   ├── AccountingView.vue
+│   │   └── EventHistoryView.vue
+│   ├── App.vue
+│   └── main.js                # Vue, Pinia y Firebase (incl. persistencia offline)
+├── index.html
+├── package.json
+├── tailwind.config.js
+├── vite.config.js             # Incluye el proxy /api-dolar para desarrollo
+├── CLAUDE.md                  # Contexto de arquitectura y gotchas del proyecto
+└── README.md
 ```
+
+> Nota: `src/composables/useUserData.js` y `src/composables/useAccountingData.js` son versiones
+> anteriores a la migración a Pinia y **ya no se usan** (ningún archivo las importa). Los
+> archivos reales son los de `src/stores/`.
 
 ## Configuración y Uso
 
 ### Prerrequisitos
 
-* Node.js (versión recomendada según `package.json` o superior) y npm (o yarn) instalados.
-* Una cuenta de Firebase y un proyecto configurado con:
-    * **Authentication:** Habilitar el proveedor de Google Sign-In.
-    * **Firestore:** Crear una base de datos Firestore.
+* Node.js y npm instalados.
+* Una cuenta de Firebase con un proyecto configurado:
+    * **Authentication:** habilitar el proveedor de Google Sign-In.
+    * **Firestore:** crear una base de datos.
 
 ### Instalación
 
@@ -124,30 +143,36 @@ mi-pasteleria-app/
 3.  Instala las dependencias:
     ```bash
     npm install
-    # o si usas yarn
-    # yarn install
     ```
 
-### Configuración de Firebase
+### Configuración de variables de entorno
 
-1.  Obtén la configuración de tu proyecto Firebase desde la Consola de Firebase (Configuración del proyecto -> Tus apps -> SDK de Firebase -> Configuración).
-2.  Crea un archivo `.env` en la raíz del proyecto.
-3.  Añade tus credenciales de Firebase al archivo `.env` con las siguientes claves (estas claves se usan en `src/main.js` a través de `import.meta.env`):
-    ```env
-    VITE_FIREBASE_API_KEY="TU_API_KEY"
-    VITE_FIREBASE_AUTH_DOMAIN="TU_AUTH_DOMAIN"
-    VITE_FIREBASE_PROJECT_ID="TU_PROJECT_ID"
-    VITE_FIREBASE_STORAGE_BUCKET="TU_STORAGE_BUCKET"
-    VITE_FIREBASE_MESSAGING_SENDER_ID="TU_MESSAGING_SENDER_ID"
-    VITE_FIREBASE_APP_ID="TU_APP_ID"
-    VITE_FIREBASE_MEASUREMENT_ID="TU_MEASUREMENT_ID" # Opcional si no usas Analytics
-    ```
-    Asegúrate de reemplazar `"TU_..."` con tus valores reales.
+Copia `.env.example` a `.env` y completa los valores. El archivo `.env` no está versionado.
 
-### Configuración de API Externa (Opcional pero Recomendado)
+```env
+VITE_FIREBASE_API_KEY=""
+VITE_FIREBASE_AUTH_DOMAIN=""
+VITE_FIREBASE_PROJECT_ID=""
+VITE_FIREBASE_STORAGE_BUCKET=""
+VITE_FIREBASE_MESSAGING_SENDER_ID=""
+VITE_FIREBASE_APP_ID=""
+VITE_FIREBASE_MEASUREMENT_ID=""   # Opcional, sólo si usas Analytics
+VITE_DOLARVENEZUELA_API_URL="https://dolarflashve.eu/api/rates/all"
+```
 
-La aplicación utiliza una API para obtener la tasa de cambio del BCV. En `src/composables/useAccountingData.js`, se usa un token para la API `pydolarve.org`.
-* **Token API:** `...` (Este token está hardcodeado. Considera moverlo a variables de entorno si es sensible o si la API lo requiere para uso personal).
+### API de tasa de cambio
+
+La tasa USD/Bs. se obtiene de `https://dolarflashve.eu/api/rates/all` (GET público, sin
+autenticación). No requiere token.
+
+Dos limitaciones a tener presentes:
+
+* **CORS:** la API no permite peticiones directas desde otro origen, así que en desarrollo se
+  llama a través del proxy `/api-dolar` definido en `vite.config.js`. Ese proxy sólo existe con
+  `npm run dev`; en un build estático no hay servidor que haga de intermediario.
+* **Sin histórico:** la API sólo devuelve la tasa vigente. Si registras un movimiento con una
+  fecha pasada para la que nunca se guardó una tasa, se usará la de hoy. Para esos casos conviene
+  cargar la tasa manualmente desde la vista de Contabilidad.
 
 ### Ejecutar la Aplicación
 
@@ -164,4 +189,12 @@ La aplicación utiliza una API para obtener la tasa de cambio del BCV. En `src/c
     npm run preview
     ```
 
-Accede a la aplicación a través de la URL proporcionada por Vite (generalmente `http://localhost:5173` en modo desarrollo).
+Accede a la aplicación a través de la URL que indique Vite (por defecto `http://localhost:5173`).
+
+## Documentación adicional
+
+* [`CLAUDE.md`](CLAUDE.md) — arquitectura, convenciones y *gotchas* del proyecto. Léelo antes de
+  tocar el código.
+* [`REDISENO-GUIA.md`](REDISENO-GUIA.md) y [`REDISENO-PLAN.md`](REDISENO-PLAN.md) — tokens de
+  diseño, catálogo de clases `.ui-*` y breakpoints.
+* [`handoff.md`](handoff.md) — registro de la última sesión de trabajo.

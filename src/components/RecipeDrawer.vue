@@ -4,6 +4,8 @@ import Multiselect from '@vueform/multiselect';
 import { formatCurrency } from '../utils/utils.js';
 import { useRecipeCosts } from '../composables/useRecipeCosts.js';
 import { multiselectTheme } from '../utils/multiselectTheme.js';
+import { startTour, stopTour } from '../composables/useTutorial.js';
+import { recipeDrawerTour } from '../utils/tourSteps.js';
 
 const props = defineProps({
     recipe: { type: Object, default: null },
@@ -152,7 +154,21 @@ const isValid = computed(() => Object.keys(errors.value).length === 0);
 const firstErrorMessage = computed(() => Object.values(errors.value)[0] || null);
 
 function closeModal() {
+    // El drawer no se desmonta al cerrarse (su <Transition> necesita que siga
+    // montado), así que el tutorial hay que cortarlo a mano.
+    stopTour();
     emit('close');
+}
+
+// Este tour no pasa por useViewTutorial: no es el de una vista, se abre sólo a
+// pedido desde el botón de la cabecera. Los pasos de la pestaña de costos no van
+// marcados `optional` justamente porque su DOM aparece recién cuando el paso
+// anterior cambia de pestaña con onNext.
+function startCostTutorial() {
+    startTour({
+        id: 'receta-costos',
+        getSteps: () => recipeDrawerTour({ setTab: (tab) => { activeTab.value = tab; } }),
+    });
 }
 
 function saveChanges() {
@@ -187,21 +203,24 @@ function saveChanges() {
                 </div>
 
                 <!-- Pestañas -->
-                <div class="shrink-0 border-b border-stone-200 px-6 py-3 dark:border-stone-700">
+                <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-6 py-3 dark:border-stone-700">
                     <div class="ui-seg-track w-fit">
                         <button type="button" :class="activeTab === 'ingredients' ? 'ui-seg-active' : 'ui-seg'" @click="activeTab = 'ingredients'">
                             Ingredientes
                         </button>
-                        <button type="button" :class="activeTab === 'costs' ? 'ui-seg-active' : 'ui-seg'" @click="activeTab = 'costs'">
+                        <button type="button" data-tour="drawer-tab-costs" :class="activeTab === 'costs' ? 'ui-seg-active' : 'ui-seg'" @click="activeTab = 'costs'">
                             Costos y márgenes
                         </button>
                     </div>
+                    <button type="button" class="ui-btn-subtle" @click="startCostTutorial">
+                        ¿Cómo se calcula el precio?
+                    </button>
                 </div>
 
                 <!-- Contenido scrollable -->
                 <div class="flex-1 overflow-y-auto px-6 py-5">
                     <div v-if="activeTab === 'ingredients'" class="space-y-5">
-                        <div class="ui-panel space-y-3 p-4">
+                        <div data-tour="drawer-ing-form" class="ui-panel space-y-3 p-4">
                             <div class="grid grid-cols-[1fr_140px] gap-3 max-[640px]:grid-cols-1">
                                 <div>
                                     <label class="ui-label">Ingrediente</label>
@@ -263,7 +282,7 @@ function saveChanges() {
                                 </p>
                             </li>
                         </ul>
-                        <div class="flex items-center justify-between border-t border-stone-200 pt-3 text-sm dark:border-stone-700">
+                        <div data-tour="drawer-ing-total" class="flex items-center justify-between border-t border-stone-200 pt-3 text-sm dark:border-stone-700">
                             <span class="font-medium text-stone-600 dark:text-stone-300">Costo total de ingredientes por lote</span>
                             <span class="font-semibold tabular-nums text-stone-800 dark:text-stone-100">{{ formatCurrency(costs.totalIngredientCost) }}</span>
                         </div>
@@ -271,31 +290,31 @@ function saveChanges() {
 
                     <div v-else class="space-y-6">
                         <div class="grid grid-cols-3 gap-4 max-[640px]:grid-cols-1">
-                            <div>
+                            <div data-tour="drawer-packaging">
                                 <label class="ui-label">Empaque (por lote, $)</label>
                                 <input v-model.number="editableRecipe.packagingCostPerBatch" type="number" min="0" step="0.01"
                                     :class="['ui-input', errors.packagingCostPerBatch && 'ui-input-error']" />
                                 <p v-if="errors.packagingCostPerBatch" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.packagingCostPerBatch }}</p>
                             </div>
-                            <div>
+                            <div data-tour="drawer-labor">
                                 <label class="ui-label">Mano de obra (por lote, $)</label>
                                 <input v-model.number="editableRecipe.laborCostPerBatch" type="number" min="0" step="0.01"
                                     :class="['ui-input', errors.laborCostPerBatch && 'ui-input-error']" />
                                 <p v-if="errors.laborCostPerBatch" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.laborCostPerBatch }}</p>
                             </div>
-                            <div>
+                            <div data-tour="drawer-items">
                                 <label class="ui-label">Items por lote</label>
                                 <input v-model.number="editableRecipe.itemsPerBatch" type="number" min="1" step="1"
                                     :class="['ui-input', errors.itemsPerBatch && 'ui-input-error']" />
                                 <p v-if="errors.itemsPerBatch" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.itemsPerBatch }}</p>
                             </div>
-                            <div>
+                            <div data-tour="drawer-margin">
                                 <label class="ui-label">Margen de ganancia (%)</label>
                                 <input v-model.number="editableRecipe.profitMarginPercent" type="number" min="0" step="0.1"
                                     :class="['ui-input', errors.profitMarginPercent && 'ui-input-error']" />
                                 <p v-if="errors.profitMarginPercent" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.profitMarginPercent }}</p>
                             </div>
-                            <div>
+                            <div data-tour="drawer-buffer">
                                 <label class="ui-label">Buffer de pérdida (%)</label>
                                 <input v-model.number="editableRecipe.lossBufferPercent" type="number" min="0" step="0.1"
                                     :class="['ui-input', errors.lossBufferPercent && 'ui-input-error']" />
@@ -303,7 +322,7 @@ function saveChanges() {
                             </div>
                         </div>
 
-                        <div class="ui-card-inverted rounded-panel p-5">
+                        <div data-tour="drawer-breakdown" class="ui-card-inverted rounded-panel p-5">
                             <p class="text-[15px] font-semibold">Cómo se forma el precio</p>
                             <dl class="mt-3 space-y-2 text-sm">
                                 <div class="flex items-center justify-between">
@@ -346,7 +365,7 @@ function saveChanges() {
                     <p class="min-w-0 flex-1 truncate text-xs font-medium text-red-600 dark:text-red-400">{{ firstErrorMessage }}</p>
                     <div class="flex shrink-0 items-center gap-3">
                         <button type="button" @click="closeModal" class="ui-btn-outline">Descartar</button>
-                        <button type="button" :disabled="!isValid" :class="!isValid ? 'ui-btn-disabled' : 'ui-btn-primary'" @click="saveChanges">
+                        <button type="button" data-tour="drawer-save" :disabled="!isValid" :class="!isValid ? 'ui-btn-disabled' : 'ui-btn-primary'" @click="saveChanges">
                             Guardar cambios
                         </button>
                     </div>

@@ -6,6 +6,7 @@ import { db } from '../main';
 import { collection, doc, getDocs, setDoc, deleteDoc, addDoc, writeBatch } from "firebase/firestore";
 import { useLocalStorage } from '../composables/useLocalStorage';
 import { useEventHistory } from '../composables/useEventHistory';
+import { getFieldLabel } from '../utils/eventLabels.js';
 
 
 
@@ -114,44 +115,6 @@ export const useUserDataStore = defineStore('userData', () => {
         }
         return changes;
     }
-
-    function getFieldLabel(key) {
-        const labels = {
-            name: 'Nombre',
-            cost: 'Costo de Presentación',
-            presentationSize: 'Tamaño de Presentación',
-            unit: 'Unidad',
-            currentStock: 'Stock Actual',
-            ingredients: 'Ingredientes',
-            packagingCostPerBatch: 'Costo de Empaque/Lote',
-            laborCostPerBatch: 'Mano de Obra/Lote',
-            itemsPerBatch: 'Items por Lote',
-            profitMarginPercent: '% Margen de Ganancia',
-            lossBufferPercent: '% Margen de Pérdida',
-            productName: 'Nombre del Producto',
-            batchSize: 'Tamaño del Lote (Cantidad)',
-            date: 'Fecha',
-            netProfit: 'Ganancia Neta',
-            recipeId: 'Receta Asociada',
-            totalRevenue: 'Ingresos Totales',
-            totalCost: 'Costo Total de Producción',
-            operatingCostRecipeOnly: 'Gastos Op. (Ingr. + Emp.)',
-            laborCostForBatch: 'Costo Mano de Obra (Lote)',
-            isSold: 'Vendido',
-            calculatedRecipeOnlyCost: 'Costo Base de Receta (Calculado)',
-            calculatedTotalBatchCostAllIncluded: 'Costo Total del Lote (Calculado)',
-            calculatedFinalPrice: 'Precio Final (Calculado)',
-            // Labels for ingredient changes (from getIngredientChangeDetails)
-            'ingredient_removed': 'Ingrediente Eliminado',
-            'ingredient_added': 'Ingrediente Añadido',
-            'ingredient_quantity_updated': 'Cantidad de Ingrediente', // Dynamic part in getIngredientChangeDetails
-            'ingredient_unit_updated': 'Unidad de Ingrediente', // Dynamic part
-        };
-        // For dynamic fields like ingredient_<id>_quantity, the label is mostly set in getIngredientChangeDetails
-        // This getFieldLabel is a fallback or for top-level fields.
-        return labels[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-    }
-
 
     // --- Funciones CRUD para Recetas ---
     async function addRecipe(tempRecipe) {

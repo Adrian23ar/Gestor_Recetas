@@ -1,100 +1,125 @@
-# Handoff — sesión 2026-08-01
+# Handoff — sesión 2026-08-03 / 2026-08-04
 
-**Último commit de esta sesión:** `e675529` — "Rediseno visual completo de la app (UI/UX,
-responsive)" (pusheado a `origin/main`)
+**Punto de partida:** `552eed9` — "documentacion de la sesion". Todo lo de abajo va en el commit
+siguiente, sobre `main`.
 
 Ver también [CLAUDE.md](CLAUDE.md) para contexto de proyecto/arquitectura de cara a futuro.
 Este archivo es un registro de lo que pasó en *esta* sesión puntual, no documentación viva.
 
 ## Qué se pidió
 
-1. Ejecutar el rediseño visual completo de la app (`REDISENO-GUIA.md` + `REDISENO-PLAN.md`, ya
-   presentes en el repo como archivos sin trackear), sin usar MCP Playwright — el usuario revisa
-   los cambios visuales él mismo.
-2. Varias rondas de fixes puntuales sobre ese rediseño, reportados por el usuario después de
-   probar la app con `npm run dev`.
-3. Commit + push, y estos dos documentos de cierre.
+1. Arreglar el responsive de la vista de Historial en móvil y agregarle filtros de búsqueda por
+   día, semana, mes y últimos 3 meses.
+2. Traducir al español dos etiquetas que salían en inglés en el modal de detalle del historial
+   ("Calculated Total Batch Cost All Included" y "Calculated Recipe Only Cost").
+3. Arreglar el responsive del filtro "Periodo" en la vista de Contabilidad.
+4. Agregar un tutorial guiado por cada vista con driver.js, incluyendo uno que explique márgenes
+   y mano de obra dentro de la ficha de receta. Con la paleta y los estilos de la app, y sin
+   explicar cosas que no estén a la vista (estados vacíos).
+5. Documentar la sesión, revisar el README y hacer commit + push.
 
 ## Qué se hizo
 
-### 1. Rediseño completo (5 fases del plan)
+### 1. Historial: traducción, responsive y filtros de fecha
 
-Fundamentos (tokens, paleta, tipografía Nunito, catálogo de clases `.ui-*`), shell de la app
-(header + nav inferior en móvil), lógica compartida (`useRecipeCosts`, `useDataTable`,
-`eventLabels`), las 5 vistas y los 8 modales/drawer reescritos, y limpieza final (se
-desinstalaron `datatables.net-*` y `chart.js` por no tener uso, se eliminaron
-`EditIngredientModal.vue`/`EditRecipeModal.vue`).
+- **La traducción ya existía**, el problema era el *fallback*. El diccionario de etiquetas de
+  campo vivía dentro de `src/stores/userData.js` y sólo se usaba al ESCRIBIR el evento
+  (`change.label`). Al leer, tanto `EventDetailsModal` como el resumen de la lista hacían
+  `change.label || change.field` — y ahí caían las entradas viejas guardadas sin `label`,
+  mostrando el nombre crudo del campo en camelCase. Se movió el diccionario a
+  `src/utils/eventLabels.js` como `getFieldLabel()` (junto al `getEventMeta()` que ya estaba) y
+  ahora los dos componentes lo usan como fallback. Arregla los eventos viejos y los nuevos sin
+  tocar datos guardados.
+- **Responsive:** el botón "Ver detalle" de cada fila ahora va pegado al borde derecho en móvil
+  (`max-[640px]:ml-auto`); antes quedaba justo después de la etiqueta, así que el borde derecho
+  se veía irregular de fila en fila. Padding más ajustado y más aire vertical en móvil.
+- **Filtros de fecha:** fila de chips (Todos / Hoy / Esta semana / Este mes / Últimos 3 meses)
+  con las clases `.ui-chip` que ya usa el Dashboard. "Esta semana" y "Este mes" usan límites de
+  calendario (la semana arranca el lunes); "Últimos 3 meses" es una ventana móvil. Se combinan
+  con el buscador que ya existía.
 
-### 2. Ronda de fixes puntuales (primer mensaje post-rediseño)
+### 2. Contabilidad: responsive del filtro "Periodo"
 
-- `RecipeDrawer`: quitado el borde/esquinas redondeadas del lado derecho (queda a ras del borde
-  de pantalla), agregada animación de entrada/salida deslizando desde la derecha
-  (`drawer-transition`, independiente del `modal-transition` compartido).
-- `RecipeCard`: el botón "Completar datos" (recetas incompletas) ahora abre el `RecipeDrawer` en
-  vez de navegar a `/ingredients`.
-- `DashboardView`: el botón "Nueva receta" ya no se ve comprimido en pantallas angostas (se
-  apilaba con el buscador sin `shrink-0`, forzando su achicamiento).
-- Traducciones faltantes en el detalle de historial (`calculatedRecipeOnlyCost`,
-  `calculatedTotalBatchCostAllIncluded`) — el archivo real es `src/stores/userData.js`
-  (`src/composables/useUserData.js` es una versión vieja sin uso, ver CLAUDE.md).
-- Reemplazo de todos los `<select>`/`<input type="date">` nativos: se instaló
-  `@vuepic/vue-datepicker` (nuevo `src/components/ui/DateField.vue`) y se usó
-  `@vueform/multiselect` para el único `<select>` restante (unidad en `IngredientModal`).
+Los cuatro elementos (etiqueta, fecha, guion, fecha) estaban en un único contenedor
+`flex-wrap` plano, así que cada uno saltaba de línea por su cuenta y el guion quedaba huérfano
+entre dos campos apilados. Se agruparon los dos date pickers + el guion en una fila propia que
+baja completa debajo de la etiqueta, y los campos se reparten el ancho sólo en móvil
+(`max-[640px]:flex-1`, pisando su ancho fijo de 152px). En escritorio no cambia nada.
 
-### 3. Bugs reportados tras probar — ronda 1
+### 3. Tutoriales guiados (driver.js) — lo grueso de la sesión
 
-- El datepicker crasheaba al abrirse: `locale="es"` (string) se pasaba directo a date-fns
-  esperando un objeto `Locale` — corregido con `import { es } from 'date-fns/locale'`.
-- El drawer de receta no animaba: `DashboardView` envolvía `<RecipeDrawer>` en su propio `v-if`,
-  desmontando el componente entero en vez de dejar que su `<Transition>` interno animara el
-  cierre — se sacó ese `v-if` y `RecipeDrawer` ahora se monta siempre (como todos los demás
-  modales), controlado solo por la prop `show`.
+Tres archivos nuevos:
 
-### 4. Bugs reportados tras probar — ronda 2
+- `src/composables/tutorialDriver.js` — chunk lazy con la librería y su CSS.
+- `src/composables/useTutorial.js` — la capa sobre driver.js: registro del tour de la vista
+  activa, filtrado de pasos, textos en español y persistencia del "ya lo vio".
+- `src/utils/tourSteps.js` — todo el contenido, una función por vista.
 
-- CORS al consultar la API de tasa del dólar (el usuario había cambiado a
-  `dolarflashve.eu/api/rates/all`, un API público nuevo): el fetch usaba la URL absoluta
-  directo, sin pasar por el proxy de `vite.config.js` — corregido para usar el proxy en dev.
-  Adaptado el parseo al nuevo shape de respuesta (`data.bcvUsd.rate`), quitado el
-  `POST`+`Authorization` que ya no aplica.
-- El datepicker seguía dejando elegir hora pese a `enable-time-picker="false"`: props mal
-  recordadas de una versión anterior de la librería — en v14 van agrupadas
-  (`time-config`/`formats`/`config`/`input-attrs`, no flat). Ver gotcha #3 en CLAUDE.md.
+Más el botón `?` en el header de `App.vue` (sólo aparece si la vista montada registró un tour) y
+atributos `data-tour="..."` como anclajes en las cinco vistas y en `RecipeDrawer`.
 
-### 5. Bugs reportados tras probar — ronda 3
+Decisiones que conviene recordar:
 
-- Datepicker sin dark mode: la librería aplica su propia clase de tema al mismo elemento según
-  su prop `dark` (no usada) — un override en `.dark` ancestro nunca podía ganarle a una regla en
-  el propio elemento. Ver gotcha #4 en CLAUDE.md.
-- Datepicker con altura distinta al input "Items del lote" de al lado (en `RegisterView`): mismo
-  problema de fondo — el CSS de la librería carga en un chunk aparte y empataba en
-  especificidad con mis overrides en `:root`, y ganaba por orden de carga. Se resolvió junto con
-  el punto anterior.
-- `EventHistoryView` se quedaba en el skeleton de carga para siempre sin sesión iniciada: el
-  watcher de `user` comparaba `newUid !== oldUid` pero en la llamada `immediate` inicial
-  `oldUser` es `undefined` → se normalizaba a `null`, empatando con `newUid` también `null`
-  (sin usuario) → nunca corría `loadHistory()`. Ver gotcha #6 en CLAUDE.md.
+- **Apertura automática** la primera vez que se entra a cada vista, marcada en `localStorage`
+  (clave `tutorialSeen`). Espera a que la vista salga del skeleton (parámetro `ready` de
+  `useViewTutorial`) para no señalar esqueletos de carga.
+- **Estados vacíos:** `optional: true` descarta el paso si su elemento no está visible;
+  `when: () => bool` lo descarta por condición de datos. Se usan pares complementarios de `when`
+  donde el mismo elemento necesita dos textos distintos (tabla de inventario con y sin datos;
+  tarjeta de estimación de Producción con y sin receta elegida).
+- El filtrado ocurre **antes** de instanciar driver, no con su opción `skipMissingElement`,
+  porque esa opción salta pasos pero los sigue contando en el "3 de 8".
+- El tour del drawer **cambia de pestaña solo** al avanzar (y vuelve atrás al retroceder) usando
+  `onNext`/`onPrev`. Sus pasos de la pestaña de costos NO van marcados `optional` justamente
+  porque su DOM todavía no existe cuando arranca el tour.
+- El contenido de márgenes y mano de obra se escribió contra la fórmula real de
+  `useRecipeCosts.js`, no de memoria: el margen es *markup sobre el costo* y el buffer se aplica
+  *después* de la ganancia. El paso del margen incluye el ejemplo numérico y la aclaración de que
+  40% sobre costo = 28,6% sobre venta, que es la confusión clásica.
+- Estilos en la sección 9 de `style.css`, con `!important` por el mismo motivo que el datepicker
+  (CSS de librería en chunk lazy, orden de carga no garantizado). La flecha del popover hay que
+  recolorearla lado por lado en modo oscuro porque hereda del `border` del elemento.
+
+### 4. Documentación
+
+- `CLAUDE.md`: sección nueva "Tutoriales guiados", driver.js agregado al stack y gotcha #7 nuevo
+  sobre las dos trampas de la librería (el hook `onNextClick` que desactiva el avance automático,
+  y el contador de progreso que cuenta el array completo). Los gotchas viejos se renumeraron.
+- `README.md`: estaba bastante desactualizado. Se corrigieron cosas que ya no existen (DataTables,
+  Chart.js, tipografía Inter, los composables `useUserData`/`useAccountingData` como fuente de
+  estado, y un token hardcodeado de `pydolarve.org` que ya no aplica) y se agregó lo que faltaba
+  (Pinia, persistencia offline, `ResponsiveTable`, la API nueva del dólar con sus dos
+  limitaciones, los tutoriales y el árbol de directorios real).
 
 ## Estado al cerrar la sesión
 
-- `npm run build` pasa limpio después de cada ronda de cambios (931 módulos, ~10-13s).
-- Todo commiteado y pusheado en `e675529`.
-- El usuario todavía no ha confirmado si la última ronda de fixes (dark mode del datepicker,
-  altura, skeleton de historial) se ve bien en el navegador — se verificó a nivel de build/CSS
-  compilado pero no visualmente (restricción explícita del usuario: sin Playwright).
+- `npm run build` pasa limpio (936 módulos, ~3,5 s).
+- driver.js queda en su propio chunk lazy (26,1 kB / 7,5 kB gzip + 3 kB de CSS). El bundle de
+  entrada quedó en 668,4 kB, prácticamente igual que antes (668,3 kB).
+- Se verificó en el CSS compilado que las reglas del popover y las cuatro de la flecha salieron
+  con sus selectores correctos.
+- **Nada se verificó visualmente en el navegador** — restricción explícita del usuario, que
+  revisa la UI él mismo con `npm run dev`.
 
 ## Cosas para tener en el radar
 
-- **CORS en producción sin verificar.** El proxy de Vite (`/api-dolar`) sólo existe en
-  `npm run dev`. En el build estático no hay servidor que proxee — si `dolarflashve.eu` bloquea
-  el origen de producción igual que bloqueaba `localhost` en dev, la tasa de cambio fallará ahí
-  y no hay forma de saberlo sin probar el deploy real.
-- **La nueva API del dólar no tiene lookup histórico.** Antes (Supabase edge function) se podía
-  pedir la tasa de una fecha pasada específica. La API nueva sólo devuelve la tasa vigente — si
-  alguien registra una transacción con fecha pasada que nunca se consultó antes (sin tasa
-  cacheada en Firestore), va a recibir la tasa de HOY etiquetada con esa fecha vieja. No hay
-  forma de arreglar esto sin otra fuente de datos histórica.
-- El bundle principal (`index-*.js`) pesa ~665 kB — preexistente, atribuible al SDK de Firebase,
-  no se tocó por estar fuera del alcance pedido.
-- `@vuepic/vue-datepicker` agrega un chunk lazy de ~225 kB (66 kB gzip) que sólo carga en las
-  vistas que usan `DateField` — no afecta el bundle de entrada.
+- **Los tutoriales no se probaron corriendo.** Lo más probable que necesite ajuste: el retardo de
+  la apertura automática (`AUTOSTART_DELAY`, 450 ms en `useTutorial.js`) y la posición de algún
+  popover en pantallas angostas.
+- **Para volver a ver las aperturas automáticas** hay que borrar la clave `tutorialSeen` de
+  localStorage a mano. No se hizo UI para eso.
+- `node_modules` no existía al empezar la sesión. Al instalar driver.js, npm refrescó cuatro
+  dependencias transitivas a versiones patch dentro de sus rangos ya existentes (`nanoid`,
+  `postcss`, `protobufjs` y una más). No se quitó nada del lockfile y el build pasa.
+- `src/composables/useUserData.js` quedó con un cambio de sólo espacios en blanco en el árbol de
+  trabajo que **no** entró al commit (es código muerto, ver CLAUDE.md).
+- **El mismo bug de etiquetas en inglés sigue latente para contabilidad.** `getFieldLabel()` de
+  `src/utils/eventLabels.js` (el fallback de lectura que se arregló esta sesión) no conoce los
+  campos que sólo usa `src/stores/accountingData.js` — `description`, `notes`, `category`,
+  `type`, `amountBs`, `exchangeRate`, `amountUsd`, `rate` — porque ese store mantiene su propio
+  diccionario local. Un evento de transacción viejo, guardado sin `label`, mostraría "Amount Bs"
+  en vez de "Monto (Bs.)". Se detectó pero no se tocó por estar fuera de lo pedido; la solución
+  es mover esas claves al diccionario compartido (no hay colisiones: `name` y `date` coinciden en
+  ambos).
+- Sigue pendiente de la sesión anterior: **CORS en producción sin verificar** para la API del
+  dólar, y que esa API **no tiene lookup histórico** de tasas.

@@ -391,3 +391,77 @@ textarea:focus {
   --dp-border-color: rgba(239, 68, 68, 0.4) !important;
 }
 
+/* =========================================================================
+   9. TUTORIAL GUIADO (driver.js) — clase `ui-tour` pasada como popoverClass
+   desde src/composables/useTutorial.js.
+   Mismo motivo de !important que la sección 8: el CSS de la librería se importa
+   desde composables/tutorialDriver.js (chunk lazy) y su orden de carga respecto
+   a este archivo no está garantizado. Las reglas con @apply ya lo heredan del
+   `important: true` del config (gotcha #1); las sueltas lo llevan escrito.
+   Además .driver-popover trae `all: unset` — sin !important, esa declaración
+   borraría estos estilos si la librería cargara después.
+   ========================================================================= */
+.ui-tour.driver-popover {
+  @apply rounded-panel bg-white p-5 font-sans text-stone-800 shadow-modal dark:bg-stone-800 dark:text-stone-100;
+  min-width: 264px !important;
+  max-width: min(340px, calc(100vw - 32px)) !important;
+}
+.ui-tour .driver-popover-title {
+  @apply block pr-7 text-[15px] font-bold leading-snug tracking-[-0.01em] text-stone-800 dark:text-stone-100;
+}
+.ui-tour .driver-popover-description {
+  @apply mt-2 text-[13px] leading-relaxed text-stone-600 dark:text-stone-300;
+}
+.ui-tour .driver-popover-description strong {
+  @apply font-bold text-stone-800 dark:text-stone-100;
+}
+.ui-tour .driver-popover-description em {
+  @apply not-italic text-stone-500 dark:text-stone-400;
+}
+.ui-tour .driver-popover-close-btn {
+  @apply flex h-7 w-7 cursor-pointer items-center justify-center rounded-control text-xl leading-none text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-700 dark:hover:text-stone-300;
+  top: 12px !important;
+  right: 12px !important;
+}
+.ui-tour .driver-popover-footer {
+  @apply mt-4 flex items-center justify-between gap-3 border-t border-stone-100 pt-3.5 dark:border-stone-700;
+}
+.ui-tour .driver-popover-progress-text {
+  @apply shrink-0 text-[11px] font-bold tabular-nums text-stone-400;
+}
+.ui-tour .driver-popover-navigation-btns {
+  @apply flex items-center gap-2;
+}
+/* `all: unset` de la librería también borra el box-sizing de los botones, de ahí
+   que se repita acá junto al resto. */
+.ui-tour .driver-popover-footer-btn {
+  @apply box-border cursor-pointer rounded-control px-3.5 py-2 text-[13px] font-semibold transition-colors;
+  text-shadow: none !important;
+}
+.ui-tour .driver-popover-prev-btn {
+  @apply border border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700;
+}
+.ui-tour .driver-popover-next-btn,
+.ui-tour .driver-popover-done-btn {
+  @apply border border-transparent bg-accent-600 text-white shadow-cta hover:bg-accent-700 dark:bg-accent-500 dark:hover:bg-accent-600;
+}
+.ui-tour .driver-popover-btn-disabled {
+  @apply cursor-not-allowed opacity-40;
+}
+
+/* La flecha hereda su color del `border` del elemento, y cada clase de lado deja
+   opaco un único borde (los otros tres quedan transparentes). Por eso el color
+   de fondo del popover hay que repetirlo lado por lado en modo oscuro. */
+.dark .ui-tour .driver-popover-arrow-side-left {
+  border-left-color: #292524 !important;
+}
+.dark .ui-tour .driver-popover-arrow-side-right {
+  border-right-color: #292524 !important;
+}
+.dark .ui-tour .driver-popover-arrow-side-top {
+  border-top-color: #292524 !important;
+}
+.dark .ui-tour .driver-popover-arrow-side-bottom {
+  border-bottom-color: #292524 !important;
+}
+

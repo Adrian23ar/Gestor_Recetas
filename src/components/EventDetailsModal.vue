@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { getEventMeta } from '../utils/eventLabels.js';
+import { getEventMeta, getFieldLabel } from '../utils/eventLabels.js';
 
 const props = defineProps({
     show: {
@@ -137,7 +137,7 @@ const formatValue = (value, fieldName) => {
                                 </thead>
                                 <tbody>
                                     <tr v-for="(change, index) in eventEntry.changes" :key="index" class="border-t border-stone-100 dark:border-stone-800">
-                                        <td class="px-3 py-2.5 font-medium text-stone-700 dark:text-stone-200">{{ change.label || change.field }}</td>
+                                        <td class="px-3 py-2.5 font-medium text-stone-700 dark:text-stone-200">{{ change.label || getFieldLabel(change.field) }}</td>
                                         <td class="break-all px-3 py-2.5 text-stone-600 dark:text-stone-300">{{ formatValue(change.oldValue, change.field) }}</td>
                                         <td class="break-all px-3 py-2.5 text-stone-600 dark:text-stone-300">{{ formatValue(change.newValue, change.field) }}</td>
                                     </tr>
@@ -147,7 +147,7 @@ const formatValue = (value, fieldName) => {
 
                         <div class="space-y-2.5 min-[641px]:hidden">
                             <div v-for="(change, index) in eventEntry.changes" :key="index" class="ui-panel space-y-1.5 p-3">
-                                <p class="text-[11px] font-bold text-stone-400">{{ change.label || change.field }}</p>
+                                <p class="text-[11px] font-bold text-stone-400">{{ change.label || getFieldLabel(change.field) }}</p>
                                 <div class="flex flex-wrap items-center gap-1.5 break-all">
                                     <span class="text-stone-500 dark:text-stone-400">{{ formatValue(change.oldValue, change.field) }}</span>
                                     <span class="text-stone-400">→</span>

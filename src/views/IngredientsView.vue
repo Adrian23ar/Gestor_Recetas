@@ -8,6 +8,8 @@ import ErrorMessage from '../components/ErrorMessage.vue';
 
 import { useIngredients } from '../composables/useIngredients.js';
 import { useToast } from "vue-toastification";
+import { useViewTutorial } from '../composables/useTutorial.js';
+import { ingredientsTour } from '../utils/tourSteps.js';
 
 const toast = useToast();
 
@@ -109,6 +111,17 @@ const highStockCount = computed(() => ingredients.value.filter(i => i.stockStatu
 const mediumStockCount = computed(() => ingredients.value.filter(i => i.stockStatus === 'medium').length);
 const lowStockCount = computed(() => ingredients.value.filter(i => i.stockStatus === 'low').length);
 const unknownStockCount = computed(() => ingredients.value.filter(i => i.stockStatus === 'unknown').length);
+
+useViewTutorial(
+    {
+        id: 'inventario',
+        getSteps: () => ingredientsTour({
+            hasIngredients: totalIngredientCount.value > 0,
+            hasUnknownStock: unknownStockCount.value > 0,
+        }),
+    },
+    () => !dataLoading.value && !dataError.value,
+);
 </script>
 
 <template>
@@ -120,13 +133,13 @@ const unknownStockCount = computed(() => ingredients.value.filter(i => i.stockSt
                     {{ totalIngredientCount }} ingredientes registrados
                 </p>
             </div>
-            <button type="button" class="ui-btn-primary" @click="openAddModal">Nuevo ingrediente</button>
+            <button type="button" data-tour="ingredients-new" class="ui-btn-primary" @click="openAddModal">Nuevo ingrediente</button>
         </div>
 
         <ErrorMessage v-if="dataError" :message="`Error al cargar ingredientes: ${dataError}`" />
 
         <template v-else>
-            <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+            <div data-tour="ingredients-stats" class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
                 <div class="ui-stat">
                     <p class="ui-label !mb-2">Total ingredientes</p>
                     <p class="text-[30px] font-semibold tabular-nums tracking-[-0.03em] text-stone-800 dark:text-stone-100">
@@ -158,11 +171,11 @@ const unknownStockCount = computed(() => ingredients.value.filter(i => i.stockSt
                     </p>
                 </div>
             </div>
-            <p v-if="unknownStockCount > 0" class="text-xs text-stone-400">
+            <p v-if="unknownStockCount > 0" data-tour="ingredients-unknown" class="text-xs text-stone-400">
                 {{ unknownStockCount }} ingrediente(s) con nivel desconocido por falta de tamaño de presentación.
             </p>
 
-            <IngredientsTable :ingredients="ingredients" :loading="dataLoading" @edit-ingredient="openEditModal"
+            <IngredientsTable data-tour="ingredients-table" :ingredients="ingredients" :loading="dataLoading" @edit-ingredient="openEditModal"
                 @delete-ingredient="handleDeleteIngredient" @edit-stock-click="handleEditStock" />
         </template>
 

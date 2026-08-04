@@ -9,6 +9,8 @@ import ConfirmationModal from '../components/ConfirmationModal.vue';
 import AccountingTransactionsTable from '../components/AccountingTransactionsTable.vue';
 import { formatCurrency } from '../utils/utils.js';
 import ErrorMessage from '../components/ErrorMessage.vue';
+import { useViewTutorial } from '../composables/useTutorial.js';
+import { accountingTour } from '../utils/tourSteps.js';
 
 const toast = useToast();
 const accountingStore = useAccountingDataStore();
@@ -87,6 +89,16 @@ const filteredTransactions = computed(() => getFilteredTransactions({
 }));
 
 const summary = computed(() => calculateSummary(filteredTransactions.value));
+
+useViewTutorial(
+    {
+        id: 'contabilidad',
+        getSteps: () => accountingTour({ hasTransactions: filteredTransactions.value.length > 0 }),
+    },
+    // La tasa se busca en onMounted; se espera a que termine para no abrir el
+    // tutorial con la tarjeta de tasa todavía en "…".
+    () => !accountingLoading.value && !rateFetchingLoading.value,
+);
 
 const lastRateDate = computed(() => {
     if (exchangeRates.value && exchangeRates.value.length > 0) {
@@ -221,10 +233,10 @@ onMounted(async () => {
                 <h1 class="ui-h1">Contabilidad</h1>
                 <p class="mt-1 text-sm text-stone-500 dark:text-stone-400">Ingresos, egresos y tasa de cambio del día</p>
             </div>
-            <button type="button" class="ui-btn-primary" @click="openAddModal">Registrar movimiento</button>
+            <button type="button" data-tour="accounting-new" class="ui-btn-primary" @click="openAddModal">Registrar movimiento</button>
         </div>
 
-        <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));">
+        <div data-tour="accounting-summary" class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));">
             <div class="ui-stat-tile">
                 <p class="ui-label !mb-2">Ingresos</p>
                 <p class="text-[28px] font-semibold tabular-nums tracking-[-0.03em] text-emerald-700 dark:text-emerald-400">
@@ -247,7 +259,7 @@ onMounted(async () => {
                 </p>
                 <p class="mt-1 text-xs tabular-nums text-stone-400">≈ {{ formatCurrency(usdEquivalent(summary.netBalance), '$') }}</p>
             </div>
-            <div class="ui-stat-tile">
+            <div data-tour="accounting-rate" class="ui-stat-tile">
                 <div class="flex items-center justify-between">
                     <p class="ui-label !mb-0">Tasa del día</p>
                     <span class="ui-badge-success">BCV</span>
@@ -278,12 +290,14 @@ onMounted(async () => {
             </div>
         </div>
 
-        <div class="ui-card-flat flex flex-wrap items-center justify-between gap-4 p-4">
-            <div class="flex flex-wrap items-center gap-2">
-                <span class="text-xs font-semibold text-stone-600 dark:text-stone-300">Periodo</span>
-                <DateField v-model="filterStartDate" size="sm" />
-                <span class="text-stone-400">–</span>
-                <DateField v-model="filterEndDate" size="sm" />
+        <div data-tour="accounting-filters" class="ui-card-flat flex flex-wrap items-center justify-between gap-4 p-4">
+            <div class="flex flex-wrap items-center gap-2 max-[640px]:w-full">
+                <span class="shrink-0 text-xs font-semibold text-stone-600 dark:text-stone-300">Periodo</span>
+                <div class="flex min-w-0 flex-1 items-center gap-2 max-[640px]:w-full">
+                    <DateField v-model="filterStartDate" size="sm" class="min-w-0 max-[640px]:flex-1" />
+                    <span class="shrink-0 text-stone-400">–</span>
+                    <DateField v-model="filterEndDate" size="sm" class="min-w-0 max-[640px]:flex-1" />
+                </div>
             </div>
             <div class="ui-seg-track">
                 <button type="button" :class="filterType === 'all' ? 'ui-seg-active' : 'ui-seg'" @click="filterType = 'all'">Todos</button>
@@ -302,7 +316,7 @@ onMounted(async () => {
             </ErrorMessage>
         </div>
 
-        <AccountingTransactionsTable v-else :records="filteredTransactions" :loading="accountingLoading && !transactions.length"
+        <AccountingTransactionsTable v-else data-tour="accounting-table" :records="filteredTransactions" :loading="accountingLoading && !transactions.length"
             @edit-transaction="openEditModal" @delete-transaction="openConfirmDelete" />
 
         <TransactionModal :show="isTransactionModalOpen" :transaction-data="editingTransaction"
